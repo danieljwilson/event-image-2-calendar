@@ -6,6 +6,7 @@ struct EventListView: View {
     @Query(sort: \PersistedEvent.createdAt, order: .reverse) private var events: [PersistedEvent]
     @State private var processor = BackgroundEventProcessor()
     @State private var showCamera = true
+    @State private var showLibrary = false
 
     var body: some View {
         NavigationStack {
@@ -17,20 +18,55 @@ struct EventListView: View {
                 }
             }
             .navigationTitle("Events")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 12) {
                     Button {
                         showCamera = true
                     } label: {
-                        Image(systemName: "camera.fill")
+                        Label("Take Photo", systemImage: "camera.fill")
+                            .frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+
+                    Button {
+                        showLibrary = true
+                    } label: {
+                        Label("Choose from Library", systemImage: "photo.on.rectangle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 8)
+                .background(.bar)
+            }
+            .fullScreenCover(isPresented: $showCamera) {
+                ZStack(alignment: .topLeading) {
+                    ImagePicker(sourceType: .camera) { image in
+                        processor.processImage(image, context: modelContext)
+                    }
+                    .ignoresSafeArea()
+
+                    Button {
+                        showCamera = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 40))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, .black.opacity(0.5))
+                            .shadow(color: .black.opacity(0.3), radius: 4)
+                    }
+                    .padding(.top, 16)
+                    .padding(.leading, 16)
                 }
             }
-            .sheet(isPresented: $showCamera) {
-                CameraSheet { image in
-                    showCamera = false
+            .sheet(isPresented: $showLibrary) {
+                ImagePicker(sourceType: .photoLibrary) { image in
                     processor.processImage(image, context: modelContext)
                 }
+                .ignoresSafeArea()
             }
         }
         .onAppear {
@@ -43,9 +79,6 @@ struct EventListView: View {
             Label("No Events", systemImage: "calendar.badge.plus")
         } description: {
             Text("Take a photo of an event poster to get started")
-        } actions: {
-            Button("Take Photo") { showCamera = true }
-                .buttonStyle(.borderedProminent)
         }
     }
 

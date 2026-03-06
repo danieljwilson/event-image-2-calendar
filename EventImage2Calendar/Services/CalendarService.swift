@@ -19,8 +19,8 @@ enum CalendarService {
         let startStr = dateFormatter.string(from: event.startDate)
         let endStr = dateFormatter.string(from: event.endDate)
 
-        // Truncate description to avoid URL length issues
-        let description = String(event.eventDescription.prefix(500))
+        // Convert raw URLs to clickable HTML links for Google Calendar
+        let description = Self.formatDescriptionWithLinks(event.eventDescription)
 
         let location = [event.venue, event.address]
             .filter { !$0.isEmpty }
@@ -39,6 +39,27 @@ enum CalendarService {
         }
 
         return components.url
+    }
+
+    /// Replaces raw URLs in description with clickable HTML links for Google Calendar
+    private static func formatDescriptionWithLinks(_ text: String) -> String {
+        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        guard let detector else { return String(text.prefix(500)) }
+
+        let nsText = text as NSString
+        let matches = detector.matches(in: text, range: NSRange(location: 0, length: nsText.length))
+
+        guard !matches.isEmpty else { return String(text.prefix(500)) }
+
+        var result = text
+        // Replace in reverse order to preserve ranges
+        for match in matches.reversed() {
+            guard let range = Range(match.range, in: result),
+                  let url = match.url else { continue }
+            result.replaceSubrange(range, with: "<a href=\"\(url.absoluteString)\">Link</a>")
+        }
+
+        return String(result.prefix(500))
     }
 
     /// Generates .ics file content and returns a temporary file URL for sharing
