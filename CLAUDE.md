@@ -21,7 +21,8 @@ EventImage2Calendar/
 │   ├── LocationService.swift             # CLLocationManager wrapper
 │   ├── CalendarService.swift             # Google Calendar URL + .ics generation
 │   ├── BackgroundEventProcessor.swift    # Background API calls + SwiftData persistence
-│   └── DigestService.swift               # POST events to Cloudflare Worker
+│   ├── DigestService.swift               # POST events to Cloudflare Worker
+│   └── WorkerAuthService.swift           # Device key registration + JWT retrieval
 ├── Views/
 │   ├── ContentView.swift                 # Root (hosts EventListView)
 │   ├── CameraView.swift                  # Camera sheet (modal) + ImagePicker + UIImage ext
@@ -34,8 +35,10 @@ EventImage2Calendar/
 cloudflare-worker/
 ├── wrangler.toml                         # Worker config + cron trigger
 ├── src/
-│   ├── index.ts                          # POST /events + daily cron
+│   ├── index.ts                          # /auth/register + /auth/token + POST /events + daily cron
 │   ├── email.ts                          # HTML digest email builder
+│   ├── security.ts                       # JWT + signature verification helpers
+│   ├── validation.ts                     # Request/schema validation
 │   └── types.ts                          # TypeScript interfaces
 ```
 
@@ -59,7 +62,7 @@ xcodegen generate
 
 # Deploy Cloudflare Worker
 cd cloudflare-worker && npm install && wrangler deploy
-# Set secrets: wrangler secret put RESEND_API_KEY / DIGEST_EMAIL_TO / AUTH_TOKEN
+# Set secrets: wrangler secret put RESEND_API_KEY / DIGEST_EMAIL_TO / JWT_SIGNING_SECRET
 ```
 
 ## Common Tasks

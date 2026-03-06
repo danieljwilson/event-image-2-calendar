@@ -1,5 +1,7 @@
 import { EventPayload } from './types';
 
+const ALLOWED_CALENDAR_HOSTS = new Set(['calendar.google.com', 'www.google.com']);
+
 export function buildDigestEmail(events: EventPayload[]): { subject: string; html: string } {
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
@@ -22,6 +24,7 @@ export function buildDigestEmail(events: EventPayload[]): { subject: string; htm
         hour: '2-digit',
         minute: '2-digit',
       });
+      const safeCalendarURL = sanitizeCalendarURL(event.googleCalendarURL);
 
       const location = [event.venue, event.address].filter(Boolean).join(', ');
 
@@ -34,8 +37,8 @@ export function buildDigestEmail(events: EventPayload[]): { subject: string; htm
         ${location ? `<p style="margin:4px 0; color:#666; font-size:14px;">&#128205; ${escapeHtml(location)}</p>` : ''}
         ${event.description ? `<p style="margin:8px 0 12px 0; color:#333; font-size:14px;">${escapeHtml(event.description)}</p>` : ''}
         ${
-          event.googleCalendarURL
-            ? `<a href="${event.googleCalendarURL}"
+          safeCalendarURL
+            ? `<a href="${safeCalendarURL}"
                style="display:inline-block; background:#4285f4; color:white; padding:10px 20px;
                       border-radius:6px; text-decoration:none; font-size:14px; font-weight:500;">
               Add to Google Calendar
@@ -71,4 +74,30 @@ function escapeHtml(text: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+export function sanitizeCalendarURL(rawURL: string): string | null {
+  if (!rawURL) return null;
+
+  let url: URL;
+  try {
+    url = new URL(rawURL);
+  } catch {
+    return null;
+  }
+
+  if (url.protocol !== 'https:') return null;
+  if (!ALLOWED_CALENDAR_HOSTS.has(url.hostname)) return null;
+  if (url.hostname === 'www.google.com' && !url.pathname.startsWith('/calendar')) return null;
+
+  return escapeAttribute(url.toString());
+}
+
+function escapeAttribute(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }

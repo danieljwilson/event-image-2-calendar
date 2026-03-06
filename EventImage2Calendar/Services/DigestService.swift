@@ -31,13 +31,12 @@ enum DigestService {
     }
 
     static func sendToDigest(_ payload: EventPayload) async {
-        let authToken = APIKeyStorage.getDigestAuthToken()
-        guard !authToken.isEmpty else { return }
+        guard let accessToken = await WorkerAuthService.accessToken() else { return }
 
         var request = URLRequest(url: workerURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(authToken, forHTTPHeaderField: "X-Auth-Token")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.httpBody = try? JSONEncoder().encode(payload)
         request.timeoutInterval = 15
 

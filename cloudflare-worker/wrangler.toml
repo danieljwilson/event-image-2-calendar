@@ -5,7 +5,7 @@ compatibility_date = "2024-01-01"
 # Secrets (set via: wrangler secret put RESEND_API_KEY, etc.)
 # RESEND_API_KEY - your Resend API key
 # DIGEST_EMAIL_TO - your email address
-# AUTH_TOKEN - shared secret for iOS app authentication
+# JWT_SIGNING_SECRET - HMAC secret for short-lived access tokens
 
 [vars]
 DIGEST_EMAIL_FROM = "onboarding@resend.dev"

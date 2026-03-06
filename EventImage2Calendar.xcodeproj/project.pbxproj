@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		22646A1DBE47EE0DD26EAEAE /* ClaudeAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DEF75409CA59775C4F2036E /* ClaudeAPIService.swift */; };
+		82CEDAF0BED46A3128F31598 /* WorkerAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A257CC8D39444EBC2CAC132 /* WorkerAuthService.swift */; };
 		96A54518FDF73B8D964EBFF0 /* CalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E54C46DA5C0D60C9D0C6BE /* CalendarService.swift */; };
 		9AC27ED8A5DDC2D7C59B738F /* EventDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5E1A177DBD7AF4556A7124 /* EventDetailView.swift */; };
 		C1CE6F951C358EE97F1431E9 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1737822EE75936DA2812DD5 /* ContentView.swift */; };
@@ -27,6 +28,7 @@
 
 /* Begin PBXFileReference section */
 		15C404C9C01D8C8FBFAF14C5 /* BackgroundEventProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundEventProcessor.swift; sourceTree = "<group>"; };
+		2A257CC8D39444EBC2CAC132 /* WorkerAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkerAuthService.swift; sourceTree = "<group>"; };
 		2BF7637C8DD086D7E12897FF /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
 		2C59582C88177834C6A565C0 /* PersistedEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedEvent.swift; sourceTree = "<group>"; };
 		4CBBF8089B5659861DD5D23C /* APIKeyStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIKeyStorage.swift; sourceTree = "<group>"; };
@@ -65,6 +67,7 @@
 				6BD95A8925138465FE04A8A0 /* DigestService.swift */,
 				B6E7042870212AB1B91CCACE /* LocationService.swift */,
 				50B2717B16D9874AB99C5802 /* WebSearchService.swift */,
+				2A257CC8D39444EBC2CAC132 /* WorkerAuthService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -216,6 +219,7 @@
 				FEB0A54D1C3BF136F04082DF /* LocationService.swift in Sources */,
 				F186D2027BEE08C67D91913B /* PersistedEvent.swift in Sources */,
 				D67934AC6FBFBCE646D5575A /* WebSearchService.swift in Sources */,
+				82CEDAF0BED46A3128F31598 /* WorkerAuthService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -352,7 +356,6 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RZ74J65XU2;
-				DIGEST_AUTH_TOKEN = "$(DIGEST_AUTH_TOKEN)";
 				INFOPLIST_FILE = EventImage2Calendar/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Used to photograph event posters";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Helps identify the city/region for event details";
@@ -378,7 +381,6 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RZ74J65XU2;
-				DIGEST_AUTH_TOKEN = "$(DIGEST_AUTH_TOKEN)";
 				INFOPLIST_FILE = EventImage2Calendar/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Used to photograph event posters";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Helps identify the city/region for event details";
