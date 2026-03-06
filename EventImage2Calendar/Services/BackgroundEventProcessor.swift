@@ -30,19 +30,6 @@ class BackgroundEventProcessor {
                     location: location
                 )
 
-                // If the AI didn't extract a URL, search for one
-                // If the AI didn't extract a URL from the poster, search for one
-                let eventURL: String?
-                if details.eventDescription.contains("http") {
-                    eventURL = nil
-                } else {
-                    eventURL = await WebSearchService.findEventURL(
-                        title: details.title,
-                        venue: details.venue,
-                        address: details.address
-                    )
-                }
-
                 await MainActor.run {
                     let descriptor = FetchDescriptor<PersistedEvent>(
                         predicate: #Predicate { $0.id == eventID }
@@ -50,8 +37,9 @@ class BackgroundEventProcessor {
                     if let persisted = try? context.fetch(descriptor).first {
                         persisted.applyExtraction(details)
 
+                        // Append a Google search link if the AI didn't extract a URL from the poster
                         if !persisted.eventDescription.contains("http") {
-                            let link = eventURL ?? WebSearchService.googleSearchURL(
+                            let link = WebSearchService.googleSearchURL(
                                 title: persisted.title,
                                 venue: persisted.venue,
                                 address: persisted.address
@@ -111,16 +99,6 @@ class BackgroundEventProcessor {
                     location: location
                 )
 
-                let eventURL: String? = if details.eventDescription.contains("http") {
-                    nil
-                } else {
-                    await WebSearchService.findEventURL(
-                        title: details.title,
-                        venue: details.venue,
-                        address: details.address
-                    )
-                }
-
                 await MainActor.run {
                     let descriptor = FetchDescriptor<PersistedEvent>(
                         predicate: #Predicate { $0.id == eventID }
@@ -129,7 +107,7 @@ class BackgroundEventProcessor {
                         persisted.applyExtraction(details)
 
                         if !persisted.eventDescription.contains("http") {
-                            let link = eventURL ?? WebSearchService.googleSearchURL(
+                            let link = WebSearchService.googleSearchURL(
                                 title: persisted.title,
                                 venue: persisted.venue,
                                 address: persisted.address
