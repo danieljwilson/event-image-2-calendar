@@ -9,4 +9,12 @@ enum APIKeyStorage {
         }
         return key
     }
+
+    static func getDigestAuthToken() -> String {
+        guard let token = Bundle.main.infoDictionary?["DIGEST_AUTH_TOKEN"] as? String,
+              !token.isEmpty else {
+            return ""
+        }
+        return token
+    }
 }

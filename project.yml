@@ -31,3 +31,4 @@ targets:
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Helps identify the city/region for event details"
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Select event poster photos from your library"
         CLAUDE_API_KEY: $(CLAUDE_API_KEY)
+        DIGEST_AUTH_TOKEN: $(DIGEST_AUTH_TOKEN)

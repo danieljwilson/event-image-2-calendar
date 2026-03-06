@@ -2,7 +2,6 @@ import Foundation
 
 enum DigestService {
     private static let workerURL = URL(string: "https://event-digest-worker.daniel-j-wilson-587.workers.dev/events")!
-    private static let authToken = "REDACTED_AUTH_TOKEN"
 
     struct EventPayload: Encodable {
         let id: String
@@ -32,6 +31,9 @@ enum DigestService {
     }
 
     static func sendToDigest(_ payload: EventPayload) async {
+        let authToken = APIKeyStorage.getDigestAuthToken()
+        guard !authToken.isEmpty else { return }
+
         var request = URLRequest(url: workerURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
