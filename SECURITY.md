@@ -7,6 +7,7 @@ This document describes the current security state of the Event Image 2 Calendar
 - iOS app captures event data and posts event payloads to a Cloudflare Worker endpoint.
 - Cloudflare Worker stores pending events in KV, sends a daily digest via Resend, and moves processed items to a sent namespace prefix.
 - Authentication now uses short-lived JWT access tokens issued by the Worker after device key signature verification.
+- Security architecture diagram: [SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md)
 
 ## Current Security Controls
 
@@ -89,3 +90,20 @@ This document describes the current security state of the Event Image 2 Calendar
 3. Move rate limiting to a stronger primitive (Durable Objects or edge-native WAF rules).
 4. Add alerting pipeline for auth failures, rate-limit spikes, and digest send failures.
 5. Add periodic dependency update automation and security patch cadence.
+
+## Priority Improvements (Current Gaps)
+
+### High Priority
+
+1. App/device attestation to reduce fraudulent client emulation.
+2. User identity + authorization model (device-only identity is insufficient for full production trust).
+3. Stronger, centralized rate limiting with atomic counters.
+
+### Medium Priority
+
+1. Security event monitoring and alerting pipeline.
+2. Rotation automation and runbook testing for JWT signing key.
+
+### Lower Priority
+
+1. Dependency update automation and vulnerability remediation cadence.
