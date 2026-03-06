@@ -50,8 +50,13 @@ class BackgroundEventProcessor {
                     if let persisted = try? context.fetch(descriptor).first {
                         persisted.applyExtraction(details)
 
-                        if let url = eventURL {
-                            persisted.eventDescription += "\n\n\(url)"
+                        if !persisted.eventDescription.contains("http") {
+                            let link = eventURL ?? WebSearchService.googleSearchURL(
+                                title: persisted.title,
+                                venue: persisted.venue,
+                                address: persisted.address
+                            )
+                            persisted.eventDescription += "\n\n\(link)"
                         }
 
                         try? context.save()
@@ -123,8 +128,13 @@ class BackgroundEventProcessor {
                     if let persisted = try? context.fetch(descriptor).first {
                         persisted.applyExtraction(details)
 
-                        if let url = eventURL {
-                            persisted.eventDescription += "\n\n\(url)"
+                        if !persisted.eventDescription.contains("http") {
+                            let link = eventURL ?? WebSearchService.googleSearchURL(
+                                title: persisted.title,
+                                venue: persisted.venue,
+                                address: persisted.address
+                            )
+                            persisted.eventDescription += "\n\n\(link)"
                         }
 
                         try? context.save()

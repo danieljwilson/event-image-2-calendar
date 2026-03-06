@@ -1,19 +1,22 @@
 import Foundation
 
 enum WebSearchService {
-    /// Searches DuckDuckGo for the event and returns the first organic result URL.
+    /// Searches Google for the event and returns the first organic result URL.
+    /// Returns nil if the search fails — caller should provide a fallback.
     static func findEventURL(title: String, venue: String, address: String) async -> String? {
         let query = [title, venue, address]
             .filter { !$0.isEmpty }
             .joined(separator: " ")
 
         guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "https://html.duckduckgo.com/html/?q=\(encoded)") else {
+              let url = URL(string: "https://www.google.com/search?q=\(encoded)&hl=en&gl=us") else {
             return nil
         }
 
         var request = URLRequest(url: url)
-        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        request.setValue("Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", forHTTPHeaderField: "User-Agent")
+        request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
+        request.setValue("text/html", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 8
 
         guard let (data, response) = try? await URLSession.shared.data(for: request),
@@ -26,24 +29,34 @@ enum WebSearchService {
         return parseFirstOrganicResult(from: html)
     }
 
+    /// Builds a Google search URL as a fallback when actual search parsing fails.
+    static func googleSearchURL(title: String, venue: String, address: String) -> String {
+        let query = [title, venue, address]
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        return "https://www.google.com/search?q=\(encoded)"
+    }
+
     private static func parseFirstOrganicResult(from html: String) -> String? {
-        // DuckDuckGo HTML lite result links: class="result__a" href="//duckduckgo.com/l/?uddg=ENCODED_URL&..."
-        // Skip ad results which are in <div class="result--ad"> sections
-        let pattern = #"class="result__a" href="([^"]+)""#
+        // Try multiple patterns — Google's HTML varies by region/device/bot
+        let patterns = [
+            #"<a href="/url\?q=(https?://[^&"]+)"#,          // Standard redirect links
+            #"<a href="(https?://(?!www\.google)[^"]+)""#,    // Direct links (non-Google)
+            #"data-href="(https?://(?!www\.google)[^"]+)""#,  // Data attributes
+        ]
 
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
 
-        let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+            for match in matches {
+                guard let range = Range(match.range(at: 1), in: html) else { continue }
+                let rawURL = String(html[range])
+                let decoded = rawURL.removingPercentEncoding ?? rawURL
 
-        for match in matches {
-            guard let range = Range(match.range(at: 1), in: html) else { continue }
-            let href = String(html[range])
-
-            // Decode the DuckDuckGo redirect URL to get the actual destination
-            if let actualURL = decodeDDGRedirect(href) {
-                // Skip ad/sponsored domains
-                if isOrganicResult(actualURL) {
-                    return actualURL
+                if isOrganicResult(decoded) {
+                    return decoded
                 }
             }
         }
@@ -51,32 +64,14 @@ enum WebSearchService {
         return nil
     }
 
-    private static func decodeDDGRedirect(_ href: String) -> String? {
-        let fullURL: String
-        if href.hasPrefix("//") {
-            fullURL = "https:\(href)"
-        } else if href.hasPrefix("/") {
-            fullURL = "https://duckduckgo.com\(href)"
-        } else {
-            fullURL = href
-        }
-
-        // Extract the actual URL from DuckDuckGo's redirect: ?uddg=ENCODED_URL
-        if let components = URLComponents(string: fullURL),
-           let uddg = components.queryItems?.first(where: { $0.name == "uddg" })?.value {
-            return uddg
-        }
-
-        // Direct URL (not a redirect)
-        if fullURL.hasPrefix("http") && !fullURL.contains("duckduckgo.com") {
-            return fullURL
-        }
-
-        return nil
-    }
-
     private static func isOrganicResult(_ url: String) -> Bool {
-        let adDomains = ["ad.doubleclick.net", "googleadservices.com", "bing.com/aclick"]
-        return !adDomains.contains(where: { url.contains($0) })
+        let skipDomains = [
+            "google.com", "googleapis.com", "googleadservices.com",
+            "doubleclick.net", "gstatic.com",
+            "accounts.google", "maps.google",
+            "facebook.com/login", "instagram.com/accounts",
+            "schema.org", "w3.org",
+        ]
+        return !skipDomains.contains(where: { url.contains($0) })
     }
 }

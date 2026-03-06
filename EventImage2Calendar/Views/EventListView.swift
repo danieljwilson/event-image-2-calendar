@@ -52,10 +52,13 @@ struct EventListView: View {
                     Button {
                         showCamera = false
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 40))
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(.white, .black.opacity(0.5))
+                        Label("Events", systemImage: "calendar")
+                            .font(.headline)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(.ultraThinMaterial)
+                            .foregroundStyle(.white)
+                            .clipShape(Capsule())
                             .shadow(color: .black.opacity(0.3), radius: 4)
                     }
                     .padding(.top, 16)

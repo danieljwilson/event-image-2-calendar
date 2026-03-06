@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -41,7 +41,7 @@
 		B1737822EE75936DA2812DD5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		B6E7042870212AB1B91CCACE /* LocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationService.swift; sourceTree = "<group>"; };
 		C91295771EE74F0660079909 /* EventImage2CalendarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventImage2CalendarApp.swift; sourceTree = "<group>"; };
-		E48C87871C77D84D139EA035 /* EventImage2Calendar.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = EventImage2Calendar.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E48C87871C77D84D139EA035 /* EventImage2Calendar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EventImage2Calendar.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E9E54C46DA5C0D60C9D0C6BE /* CalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarService.swift; sourceTree = "<group>"; };
 		EB5E1A177DBD7AF4556A7124 /* EventDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDetailView.swift; sourceTree = "<group>"; };
 		FBB53E87833EF43E941D4223 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -161,7 +161,6 @@
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					4E1E02E74F9D134FB51223A5 = {
-						DevelopmentTeam = RZ74J65XU2;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -176,7 +175,6 @@
 			);
 			mainGroup = AF35BB7730C78E607516DE43;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -351,7 +349,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = RZ74J65XU2;
+				DEVELOPMENT_TEAM = D5EUA44D5Y;
 				INFOPLIST_FILE = EventImage2Calendar/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Used to photograph event posters";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Helps identify the city/region for event details";
@@ -376,7 +374,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = RZ74J65XU2;
+				DEVELOPMENT_TEAM = D5EUA44D5Y;
 				INFOPLIST_FILE = EventImage2Calendar/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Used to photograph event posters";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Helps identify the city/region for event details";
