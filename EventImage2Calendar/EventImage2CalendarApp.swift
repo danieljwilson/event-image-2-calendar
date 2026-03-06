@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 @main
 struct EventImage2CalendarApp: App {
@@ -6,5 +7,6 @@ struct EventImage2CalendarApp: App {
         WindowGroup {
             ContentView()
         }
+        .modelContainer(for: PersistedEvent.self)
     }
 }

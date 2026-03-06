@@ -25,3 +25,8 @@ Secrets.xcconfig
 .build/
 .swiftpm/
 Package.resolved
+
+# Cloudflare Worker
+cloudflare-worker/node_modules/
+cloudflare-worker/.wrangler/
+cloudflare-worker/dist/

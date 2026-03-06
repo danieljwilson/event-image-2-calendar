@@ -51,12 +51,11 @@ struct EventDetailsDTO: Decodable {
     }
 
     func toEventDetails() -> EventDetails {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate, .withTime, .withColonSeparatorInTime]
+        // Resolve the event timezone for parsing dates without offset
+        let eventTimeZone: TimeZone? = timezone.flatMap { TimeZone(identifier: $0) }
 
-        // Try multiple date formats for resilience
-        let start = parseDate(startDatetime) ?? Date()
-        let end = parseDate(endDatetime) ?? start.addingTimeInterval(7200)
+        let start = parseDate(startDatetime, eventTimeZone: eventTimeZone) ?? Date()
+        let end = parseDate(endDatetime, eventTimeZone: eventTimeZone) ?? start.addingTimeInterval(7200)
 
         return EventDetails(
             title: title ?? "Untitled Event",
@@ -69,21 +68,22 @@ struct EventDetailsDTO: Decodable {
         )
     }
 
-    private func parseDate(_ string: String?) -> Date? {
+    private func parseDate(_ string: String?, eventTimeZone: TimeZone?) -> Date? {
         guard let string else { return nil }
 
-        // Try ISO 8601 with timezone
+        // Try ISO 8601 with explicit timezone offset (e.g., 2026-03-20T19:00:00+01:00)
+        // These are already unambiguous, so parse as-is
         let isoFormatter = ISO8601DateFormatter()
         isoFormatter.formatOptions = [.withInternetDateTime]
         if let date = isoFormatter.date(from: string) { return date }
 
-        // Try ISO 8601 without timezone
-        isoFormatter.formatOptions = [.withFullDate, .withTime, .withColonSeparatorInTime]
-        if let date = isoFormatter.date(from: string) { return date }
-
-        // Try common date format without T separator
+        // For dates WITHOUT timezone offset, interpret in the event's timezone
+        // (e.g., "2026-03-20T19:00:00" with timezone "Europe/Paris" means 19:00 Paris time)
+        let tz = eventTimeZone ?? .current
         let dateFormatter = DateFormatter()
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.timeZone = tz
+
         for format in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm"] {
             dateFormatter.dateFormat = format
             if let date = dateFormatter.date(from: string) { return date }

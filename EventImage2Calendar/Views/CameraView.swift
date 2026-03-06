@@ -1,58 +1,68 @@
 import SwiftUI
 import UIKit
 
-struct CameraView: View {
+struct CameraSheet: View {
     var onImageCaptured: (UIImage) -> Void
+    @Environment(\.dismiss) private var dismiss
     @State private var showCamera = false
     @State private var showLibrary = false
 
     var body: some View {
-        VStack(spacing: 32) {
-            Spacer()
+        NavigationStack {
+            VStack(spacing: 32) {
+                Spacer()
 
-            Image(systemName: "camera.viewfinder")
-                .font(.system(size: 80))
-                .foregroundStyle(.tint)
+                Image(systemName: "camera.viewfinder")
+                    .font(.system(size: 80))
+                    .foregroundStyle(.tint)
 
-            VStack(spacing: 8) {
-                Text("Event Snap")
-                    .font(.largeTitle.bold())
-                Text("Take a photo of any event poster")
-                    .font(.subheadline)
+                Text("Snap an event poster")
+                    .font(.title2)
                     .foregroundStyle(.secondary)
-            }
 
-            Spacer()
+                Spacer()
 
-            VStack(spacing: 12) {
-                Button {
-                    showCamera = true
-                } label: {
-                    Label("Take Photo", systemImage: "camera.fill")
-                        .frame(maxWidth: .infinity)
+                VStack(spacing: 12) {
+                    Button {
+                        showCamera = true
+                    } label: {
+                        Label("Take Photo", systemImage: "camera.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+
+                    Button {
+                        showLibrary = true
+                    } label: {
+                        Label("Choose from Library", systemImage: "photo.on.rectangle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-
-                Button {
-                    showLibrary = true
-                } label: {
-                    Label("Choose from Library", systemImage: "photo.on.rectangle")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 40)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 40)
-        }
-        .sheet(isPresented: $showCamera) {
-            ImagePicker(sourceType: .camera, onImagePicked: onImageCaptured)
+            .navigationTitle("New Event")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showCamera) {
+                ImagePicker(sourceType: .camera, onImagePicked: { image in
+                    onImageCaptured(image)
+                })
                 .ignoresSafeArea()
-        }
-        .sheet(isPresented: $showLibrary) {
-            ImagePicker(sourceType: .photoLibrary, onImagePicked: onImageCaptured)
+            }
+            .sheet(isPresented: $showLibrary) {
+                ImagePicker(sourceType: .photoLibrary, onImagePicked: { image in
+                    onImageCaptured(image)
+                })
                 .ignoresSafeArea()
+            }
         }
     }
 }

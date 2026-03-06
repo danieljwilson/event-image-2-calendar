@@ -45,23 +45,51 @@ enum ClaudeAPIService {
         }
 
         let systemPrompt = """
-        You are an event detail extractor. Analyze the event poster image and extract structured details. \
+        You are an expert event detail extractor specializing in cultural and social events. \
+        Analyze the event poster image and extract the PRIMARY ATTENDABLE EVENT — the specific \
+        occasion a person would go to at a particular date and time.
+
+        CRITICAL RULES FOR EVENT IDENTIFICATION:
+        1. PRIORITIZE events with SPECIFIC TIMES (e.g., "19h", "7pm", "doors open 20:00") over date ranges.
+        2. A "vernissage" (opening night/reception) IS the primary event, NOT the exhibition run dates.
+        3. A "launch party", "opening night", "premiere", or "kickoff" is the event, not the season/run.
+        4. If a poster shows BOTH an event with a specific time AND a date range, extract the TIMED event. \
+           Mention the date range in the description field only.
+        5. Date ranges (e.g., "21/03 - 02/04") are exhibition/festival durations — include them in \
+           the description but do NOT use them as start/end dates unless no specific timed event exists.
+        6. If ONLY a date range exists with no specific timed event, use the FIRST day at 10:00 as start \
+           and the SAME day at 18:00 as end (assume a day visit).
+
+        CULTURAL TERMS TO RECOGNIZE:
+        - "Vernissage" / "Finissage" = opening/closing reception event (typically 2-3 hours)
+        - "Inauguration" = opening ceremony
+        - "Soirée" = evening event
+        - "Apéro" / "Apéritif" = drinks reception (typically 1.5-2 hours)
+        - "Conférence" / "Table ronde" = talk/panel (typically 1.5-2 hours)
+
+        END TIME RULES:
+        - If no end time is specified, default to start time + 2 hours.
+        - If the event type implies a known duration (concert = 3h, reception/vernissage = 2h, talk = 1.5h), use that.
+        - NEVER set the end date to a different day unless the poster explicitly states an overnight event.
+
         Respond with ONLY a JSON object, no markdown fences, no other text. Use this exact schema:
         {
-          "title": "Event title",
-          "start_datetime": "ISO 8601 datetime (e.g., 2026-03-15T19:00:00)",
-          "end_datetime": "ISO 8601 datetime or null if not specified",
+          "title": "Event title (include event type if applicable, e.g., 'Vernissage: OTOM Solo Show')",
+          "start_datetime": "ISO 8601 datetime (e.g., 2026-03-20T19:00:00)",
+          "end_datetime": "ISO 8601 datetime (e.g., 2026-03-20T21:00:00)",
           "venue": "Venue name",
-          "address": "Full address including city, state/country",
-          "description": "Brief description of the event (1-3 sentences)",
-          "timezone": "IANA timezone (e.g., America/New_York)"
+          "address": "Full address including city, postal code, state/country",
+          "description": "Brief description (1-3 sentences). Include exhibition/festival run dates here if different from the event date. If a website URL, ticket link, or social media link is visible on the poster, include it at the end.",
+          "timezone": "IANA timezone (e.g., Europe/Paris)"
         }
         If a field cannot be determined from the image, use your best guess based on context or set to null. \
         For dates without a year, assume the nearest future occurrence.
         """
 
         let userText = """
-        Extract the event details from this poster image.
+        Extract the PRIMARY ATTENDABLE EVENT from this poster image. \
+        If there are multiple dates (e.g., an opening reception AND an exhibition run), \
+        extract the specific timed event that someone would attend, not the date range.
 
         \(locationContext)
 
@@ -99,7 +127,7 @@ enum ClaudeAPIService {
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
-        request.timeoutInterval = 30
+        request.timeoutInterval = 25
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
