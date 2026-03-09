@@ -16,12 +16,14 @@ targets:
     platform: iOS
     sources:
       - EventImage2Calendar
+      - Shared
     settings:
       base:
         INFOPLIST_FILE: EventImage2Calendar/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.eventsnap.EventImage2Calendar
         DEVELOPMENT_TEAM: RZ74J65XU2
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: EventImage2Calendar/EventImage2Calendar.entitlements
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.9"
@@ -31,3 +33,27 @@ targets:
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Helps identify the city/region for event details"
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Select event poster photos from your library"
         CLAUDE_API_KEY: $(CLAUDE_API_KEY)
+    dependencies:
+      - target: ShareExtension
+    scheme:
+      testTargets: []
+
+  ShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - ShareExtension
+      - Shared
+    settings:
+      base:
+        INFOPLIST_FILE: ShareExtension/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.eventsnap.EventImage2Calendar.ShareExtension
+        DEVELOPMENT_TEAM: RZ74J65XU2
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtension.entitlements
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+    scheme:
+      testTargets: []

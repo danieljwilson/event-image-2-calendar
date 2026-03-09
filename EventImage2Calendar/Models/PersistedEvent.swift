@@ -29,10 +29,47 @@ final class PersistedEvent {
     var retryCount: Int
     var sentToDigest: Bool
     var googleCalendarURL: String?
+    var isAllDay: Bool
+    var eventDatesRaw: String?
+
+    static let maxRetryCount = 5
+    static let stuckProcessingTimeout: TimeInterval = 300
 
     var status: EventStatus {
         get { EventStatus(rawValue: statusRaw) ?? .processing }
         set { statusRaw = newValue.rawValue }
+    }
+
+    var canRetry: Bool {
+        retryCount < Self.maxRetryCount
+    }
+
+    var isStuckProcessing: Bool {
+        status == .processing && Date().timeIntervalSince(updatedAt) > Self.stuckProcessingTimeout
+    }
+
+    var hasRetryableError: Bool {
+        guard let message = errorMessage else { return false }
+        if message.hasPrefix("Network error") { return true }
+        if message.contains("Server error") { return true }
+        if message.contains("Too many requests") { return true }
+        return false
+    }
+
+    var eventDates: [String] {
+        get {
+            guard let raw = eventDatesRaw,
+                  let data = raw.data(using: .utf8),
+                  let dates = try? JSONDecoder().decode([String].self, from: data) else {
+                return []
+            }
+            return dates
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                eventDatesRaw = String(data: data, encoding: .utf8)
+            }
+        }
     }
 
     init(
@@ -44,7 +81,8 @@ final class PersistedEvent {
         eventDescription: String = "",
         timezone: String? = nil,
         status: EventStatus = .processing,
-        imageData: Data? = nil
+        imageData: Data? = nil,
+        isAllDay: Bool = false
     ) {
         self.id = UUID()
         self.title = title
@@ -62,6 +100,8 @@ final class PersistedEvent {
         self.retryCount = 0
         self.sentToDigest = false
         self.googleCalendarURL = nil
+        self.isAllDay = isAllDay
+        self.eventDatesRaw = nil
     }
 
     func applyExtraction(_ details: EventDetails) {
@@ -72,6 +112,8 @@ final class PersistedEvent {
         self.address = details.address
         self.eventDescription = details.eventDescription
         self.timezone = details.timezone
+        self.isAllDay = details.isAllDay
+        self.eventDates = details.eventDates
         self.status = .ready
         self.updatedAt = Date()
         self.googleCalendarURL = CalendarService.googleCalendarURL(for: details)?.absoluteString
@@ -85,7 +127,9 @@ final class PersistedEvent {
             venue: venue,
             address: address,
             eventDescription: eventDescription,
-            timezone: timezone
+            timezone: timezone,
+            isAllDay: isAllDay,
+            eventDates: eventDates
         )
     }
 }

@@ -6,6 +6,7 @@ enum ClaudeAPIError: LocalizedError {
     case invalidResponse
     case apiError(String)
     case decodingFailed(String)
+    case noEventFound
 
     var errorDescription: String? {
         switch self {
@@ -17,6 +18,41 @@ enum ClaudeAPIError: LocalizedError {
             return "API error: \(message)"
         case .decodingFailed(let detail):
             return "Failed to parse event details: \(detail)"
+        case .noEventFound:
+            return "No event details could be identified in this image."
+        }
+    }
+
+    var isRetryable: Bool {
+        switch self {
+        case .noAPIKey, .invalidResponse, .decodingFailed, .noEventFound:
+            return false
+        case .apiError(let message):
+            if message.hasPrefix("Network error:") { return true }
+            if message.contains("HTTP 5") { return true }
+            if message.contains("HTTP 429") { return true }
+            return false
+        }
+    }
+
+    var userFacingMessage: String {
+        switch self {
+        case .noAPIKey:
+            return "API key not configured. Check app settings."
+        case .invalidResponse:
+            return "Received an unexpected response. Try again."
+        case .apiError(let message):
+            if message.hasPrefix("Network error:") { return "Network error. Will retry automatically." }
+            if message.contains("HTTP 5") { return "Server error. Will retry automatically." }
+            if message.contains("HTTP 429") { return "Too many requests. Will retry shortly." }
+            if message.contains("HTTP 401") || message.contains("HTTP 403") {
+                return "Authentication error. Check your API key."
+            }
+            return "API error occurred. Try again later."
+        case .decodingFailed:
+            return "Could not read event details from this image."
+        case .noEventFound:
+            return "No event details found in this image. Try a clearer photo."
         }
     }
 }
@@ -57,8 +93,9 @@ enum ClaudeAPIService {
            Mention the date range in the description field only.
         5. Date ranges (e.g., "21/03 - 02/04") are exhibition/festival durations — include them in \
            the description but do NOT use them as start/end dates unless no specific timed event exists.
-        6. If ONLY a date range exists with no specific timed event, use the FIRST day at 10:00 as start \
-           and the SAME day at 18:00 as end (assume a day visit).
+        6. If ONLY a date range exists with no specific timed event, set is_multi_day to true. \
+           Set start_datetime to the first date and end_datetime to the last date (date-only format "YYYY-MM-DD"). \
+           List each individual date in event_dates.
 
         CULTURAL TERMS TO RECOGNIZE:
         - "Vernissage" / "Finissage" = opening/closing reception event (typically 2-3 hours)
@@ -67,7 +104,7 @@ enum ClaudeAPIService {
         - "Apéro" / "Apéritif" = drinks reception (typically 1.5-2 hours)
         - "Conférence" / "Table ronde" = talk/panel (typically 1.5-2 hours)
 
-        END TIME RULES:
+        END TIME RULES (for timed events only, not multi-day):
         - If no end time is specified, default to start time + 2 hours.
         - If the event type implies a known duration (concert = 3h, reception/vernissage = 2h, talk = 1.5h), use that.
         - NEVER set the end date to a different day unless the poster explicitly states an overnight event.
@@ -75,13 +112,21 @@ enum ClaudeAPIService {
         Respond with ONLY a JSON object, no markdown fences, no other text. Use this exact schema:
         {
           "title": "Event title (include event type if applicable, e.g., 'Vernissage: OTOM Solo Show')",
-          "start_datetime": "ISO 8601 datetime (e.g., 2026-03-20T19:00:00)",
-          "end_datetime": "ISO 8601 datetime (e.g., 2026-03-20T21:00:00)",
+          "start_datetime": "ISO 8601 datetime (e.g., 2026-03-20T19:00:00) or date-only for multi-day (e.g., 2026-05-02)",
+          "end_datetime": "ISO 8601 datetime (e.g., 2026-03-20T21:00:00) or date-only for multi-day (e.g., 2026-05-03)",
           "venue": "Venue name",
           "address": "Full address including city, postal code, state/country",
           "description": "Brief description (1-3 sentences). Include exhibition/festival run dates here if different from the event date. If a website URL, ticket link, or social media link is visible on the poster, include it at the end.",
-          "timezone": "IANA timezone (e.g., Europe/Paris)"
+          "timezone": "IANA timezone (e.g., Europe/Paris)",
+          "is_multi_day": false,
+          "event_dates": ["2026-05-02", "2026-05-03"]
         }
+        MULTI-DAY RULES:
+        - Set is_multi_day to true ONLY when the event spans multiple days with no single specific timed event.
+        - When is_multi_day is true, list ALL individual dates in event_dates array (e.g., a 2-day festival on May 2-3 → ["2026-05-02", "2026-05-03"]).
+        - When is_multi_day is false, event_dates should be an empty array [].
+        - For timed events (vernissage, concert, etc.), always set is_multi_day to false even if there is also a date range on the poster.
+
         If a field cannot be determined from the image, use your best guess based on context or set to null. \
         For dates without a year, assume the nearest future occurrence.
         """
@@ -121,6 +166,75 @@ enum ClaudeAPIService {
             ]
         ]
 
+        return try await sendRequest(requestBody)
+    }
+
+    // MARK: - URL-based extraction (for shared URLs)
+
+    static func extractEventFromURL(
+        urlString: String,
+        location: CLLocationCoordinate2D?
+    ) async throws -> EventDetails {
+        let apiKey = APIKeyStorage.getAPIKey()
+        guard !apiKey.isEmpty else { throw ClaudeAPIError.noAPIKey }
+
+        let locationContext: String
+        if let loc = location {
+            locationContext = """
+            The user is currently located at latitude \(loc.latitude), longitude \(loc.longitude). \
+            Use this to help identify the city/region if not evident from the URL.
+            """
+        } else {
+            locationContext = "No location data available."
+        }
+
+        let systemPrompt = """
+        You are an expert event detail extractor. The user has shared a URL that likely points to \
+        an event page. Based on the URL structure, domain, and any identifiers in the path, extract \
+        event details using your knowledge of common event platforms (Eventbrite, Meetup, Facebook Events, \
+        Instagram, gallery websites, etc.).
+
+        Respond with ONLY a JSON object, no markdown fences, no other text. Use this exact schema:
+        {
+          "title": "Event title (your best inference from the URL)",
+          "start_datetime": "ISO 8601 datetime if inferable, otherwise null",
+          "end_datetime": "ISO 8601 datetime if inferable, otherwise null",
+          "venue": "Venue name if inferable",
+          "address": "Full address if inferable",
+          "description": "Brief description. Always include the source URL.",
+          "timezone": "IANA timezone if inferable"
+        }
+        If a field cannot be determined, set to null. For dates without a year, assume the nearest future occurrence.
+        """
+
+        let userText = """
+        Extract event details from this shared URL: \(urlString)
+
+        \(locationContext)
+
+        Today's date is \(Self.todayString()) for reference.
+        """
+
+        let requestBody: [String: Any] = [
+            "model": "claude-haiku-4-5",
+            "max_tokens": 1024,
+            "system": systemPrompt,
+            "messages": [
+                [
+                    "role": "user",
+                    "content": userText
+                ]
+            ]
+        ]
+
+        return try await sendRequest(requestBody)
+    }
+
+    // MARK: - Shared request logic
+
+    private static func sendRequest(_ requestBody: [String: Any]) async throws -> EventDetails {
+        let apiKey = APIKeyStorage.getAPIKey()
+
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -129,7 +243,13 @@ enum ClaudeAPIService {
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
         request.timeoutInterval = 25
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw ClaudeAPIError.apiError("Network error: \(error.localizedDescription)")
+        }
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ClaudeAPIError.invalidResponse
@@ -140,14 +260,12 @@ enum ClaudeAPIService {
             throw ClaudeAPIError.apiError("HTTP \(httpResponse.statusCode): \(body)")
         }
 
-        // Parse Claude's response
         let claudeResponse = try JSONDecoder().decode(ClaudeResponse.self, from: data)
         guard let textContent = claudeResponse.content.first(where: { $0.type == "text" }),
               let jsonString = textContent.text else {
             throw ClaudeAPIError.invalidResponse
         }
 
-        // Extract JSON from response (handles markdown fences)
         let cleanJSON = extractJSON(from: jsonString)
         guard let jsonData = cleanJSON.data(using: .utf8) else {
             throw ClaudeAPIError.decodingFailed("Could not convert response to data")
@@ -155,7 +273,12 @@ enum ClaudeAPIService {
 
         do {
             let dto = try JSONDecoder().decode(EventDetailsDTO.self, from: jsonData)
+            if dto.title == nil && dto.venue == nil && dto.startDatetime == nil {
+                throw ClaudeAPIError.noEventFound
+            }
             return dto.toEventDetails()
+        } catch let error as ClaudeAPIError {
+            throw error
         } catch {
             throw ClaudeAPIError.decodingFailed(error.localizedDescription)
         }

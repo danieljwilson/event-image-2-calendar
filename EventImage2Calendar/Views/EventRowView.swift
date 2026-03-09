@@ -33,7 +33,14 @@ struct EventRowView: View {
                     Text(event.errorMessage ?? "Extraction failed")
                         .font(.caption)
                         .foregroundStyle(.red)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                    if event.retryCount > 0 {
+                        Text(event.canRetry
+                            ? "Retried \(event.retryCount)x — swipe to retry"
+                            : "Max retries reached")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
                     Text(event.startDate, style: .date)
                         .font(.subheadline)
@@ -77,8 +84,13 @@ struct EventRowView: View {
             Circle()
                 .fill(.blue)
                 .frame(width: 8, height: 8)
-        default:
-            EmptyView()
+        case .failed:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+                .font(.caption)
+        case .processing:
+            ProgressView()
+                .controlSize(.mini)
         }
     }
 }

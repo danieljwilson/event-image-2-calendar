@@ -3,6 +3,7 @@ import SwiftData
 
 struct EventListView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \PersistedEvent.createdAt, order: .reverse) private var events: [PersistedEvent]
     @State private var processor = BackgroundEventProcessor()
     @State private var showCamera = true
@@ -74,6 +75,19 @@ struct EventListView: View {
         }
         .onAppear {
             processor.locationService.requestLocation()
+            processor.recoverStuckEvents(context: modelContext)
+            processor.autoRetryEligibleEvents(context: modelContext)
+            consumePendingShares()
+            registerForShareNotifications()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                processor.recoverStuckEvents(context: modelContext)
+                consumePendingShares()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.eventsnap.pendingSharesAvailable"))) { _ in
+            consumePendingShares()
         }
     }
 
@@ -83,6 +97,38 @@ struct EventListView: View {
         } description: {
             Text("Take a photo of an event poster to get started")
         }
+    }
+
+    // MARK: - Share Extension consumption
+
+    private func consumePendingShares() {
+        let pendingShares = SharedContainerService.loadPendingShares()
+        for (share, imageData) in pendingShares {
+            processor.processSharedItem(share, imageData: imageData, context: modelContext)
+            SharedContainerService.deletePendingShare(share)
+        }
+        if !pendingShares.isEmpty {
+            showCamera = false
+        }
+    }
+
+    private func registerForShareNotifications() {
+        let name = "com.eventsnap.newShareAvailable" as CFString
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            nil,
+            { _, _, _, _, _ in
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("com.eventsnap.pendingSharesAvailable"),
+                        object: nil
+                    )
+                }
+            },
+            name,
+            nil,
+            .deliverImmediately
+        )
     }
 
     private var eventList: some View {
@@ -119,9 +165,17 @@ struct EventListView: View {
 
             let processingEvents = events.filter { $0.status == .processing }
             if !processingEvents.isEmpty {
-                Section("Processing") {
+                Section {
                     ForEach(processingEvents) { event in
                         EventRowView(event: event)
+                    }
+                } header: {
+                    HStack(spacing: 6) {
+                        Text("Processing")
+                        ProgressView()
+                            .controlSize(.mini)
+                        Text("(\(processingEvents.count))")
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -132,12 +186,14 @@ struct EventListView: View {
                     ForEach(failedEvents) { event in
                         EventRowView(event: event)
                             .swipeActions(edge: .leading) {
-                                Button {
-                                    processor.retryEvent(event, context: modelContext)
-                                } label: {
-                                    Label("Retry", systemImage: "arrow.clockwise")
+                                if event.canRetry {
+                                    Button {
+                                        processor.retryEvent(event, context: modelContext)
+                                    } label: {
+                                        Label("Retry", systemImage: "arrow.clockwise")
+                                    }
+                                    .tint(.blue)
                                 }
-                                .tint(.blue)
                             }
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {

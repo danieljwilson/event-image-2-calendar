@@ -12,12 +12,27 @@ enum CalendarService {
     static func googleCalendarURL(for event: EventDetails) -> URL? {
         var components = URLComponents(string: "https://calendar.google.com/calendar/render")!
 
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
-        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        let startStr: String
+        let endStr: String
 
-        let startStr = dateFormatter.string(from: event.startDate)
-        let endStr = dateFormatter.string(from: event.endDate)
+        if event.isAllDay {
+            // All-day format: yyyyMMdd (end date is exclusive in Google Calendar)
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyyMMdd"
+            dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+
+            startStr = dateFormatter.string(from: event.startDate)
+            // Add one day to end date (Google Calendar all-day end is exclusive)
+            let exclusiveEnd = Calendar.current.date(byAdding: .day, value: 1, to: event.endDate) ?? event.endDate
+            endStr = dateFormatter.string(from: exclusiveEnd)
+        } else {
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
+            dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+
+            startStr = dateFormatter.string(from: event.startDate)
+            endStr = dateFormatter.string(from: event.endDate)
+        }
 
         // Convert raw URLs to clickable HTML links for Google Calendar
         let description = Self.formatDescriptionWithLinks(event.eventDescription)
@@ -64,10 +79,6 @@ enum CalendarService {
 
     /// Generates .ics file content and returns a temporary file URL for sharing
     static func generateICSFile(for event: EventDetails) -> URL? {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
-        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-
         let location = [event.venue, event.address]
             .filter { !$0.isEmpty }
             .joined(separator: ", ")
@@ -78,13 +89,33 @@ enum CalendarService {
             .replacingOccurrences(of: "\n", with: "\\n")
         let escapedLocation = location.replacingOccurrences(of: ",", with: "\\,")
 
+        let dtStart: String
+        let dtEnd: String
+
+        if event.isAllDay {
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyyMMdd"
+            dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+
+            let exclusiveEnd = Calendar.current.date(byAdding: .day, value: 1, to: event.endDate) ?? event.endDate
+            dtStart = "DTSTART;VALUE=DATE:\(dateFormatter.string(from: event.startDate))"
+            dtEnd = "DTEND;VALUE=DATE:\(dateFormatter.string(from: exclusiveEnd))"
+        } else {
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
+            dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+
+            dtStart = "DTSTART:\(dateFormatter.string(from: event.startDate))"
+            dtEnd = "DTEND:\(dateFormatter.string(from: event.endDate))"
+        }
+
         let icsContent = """
         BEGIN:VCALENDAR
         VERSION:2.0
         PRODID:-//EventSnap//EN
         BEGIN:VEVENT
-        DTSTART:\(dateFormatter.string(from: event.startDate))
-        DTEND:\(dateFormatter.string(from: event.endDate))
+        \(dtStart)
+        \(dtEnd)
         SUMMARY:\(escapedTitle)
         LOCATION:\(escapedLocation)
         DESCRIPTION:\(escapedDescription)

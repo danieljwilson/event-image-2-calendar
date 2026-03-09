@@ -106,18 +106,3 @@ struct ImagePicker: UIViewControllerRepresentable {
         }
     }
 }
-
-// MARK: - Image resizing for API upload
-
-extension UIImage {
-    func resizedForAPI(maxDimension: CGFloat = 1024) -> Data? {
-        let scale = min(maxDimension / size.width, maxDimension / size.height, 1.0)
-        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
-
-        let renderer = UIGraphicsImageRenderer(size: newSize)
-        let resized = renderer.image { _ in
-            draw(in: CGRect(origin: .zero, size: newSize))
-        }
-        return resized.jpegData(compressionQuality: 0.7)
-    }
-}

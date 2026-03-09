@@ -9,6 +9,8 @@ class EventDetails {
     var address: String
     var eventDescription: String
     var timezone: String?
+    var isAllDay: Bool
+    var eventDates: [String]
 
     init(
         title: String = "",
@@ -17,7 +19,9 @@ class EventDetails {
         venue: String = "",
         address: String = "",
         eventDescription: String = "",
-        timezone: String? = nil
+        timezone: String? = nil,
+        isAllDay: Bool = false,
+        eventDates: [String] = []
     ) {
         self.title = title
         self.startDate = startDate
@@ -26,6 +30,8 @@ class EventDetails {
         self.address = address
         self.eventDescription = eventDescription
         self.timezone = timezone
+        self.isAllDay = isAllDay
+        self.eventDates = eventDates
     }
 }
 
@@ -39,6 +45,8 @@ struct EventDetailsDTO: Decodable {
     let address: String?
     let description: String?
     let timezone: String?
+    let isMultiDay: Bool?
+    let eventDates: [String]?
 
     enum CodingKeys: String, CodingKey {
         case title
@@ -48,14 +56,22 @@ struct EventDetailsDTO: Decodable {
         case address
         case description
         case timezone
+        case isMultiDay = "is_multi_day"
+        case eventDates = "event_dates"
     }
 
     func toEventDetails() -> EventDetails {
-        // Resolve the event timezone for parsing dates without offset
         let eventTimeZone: TimeZone? = timezone.flatMap { TimeZone(identifier: $0) }
+        let isMulti = isMultiDay ?? false
 
         let start = parseDate(startDatetime, eventTimeZone: eventTimeZone) ?? Date()
-        let end = parseDate(endDatetime, eventTimeZone: eventTimeZone) ?? start.addingTimeInterval(7200)
+        let end: Date
+        if isMulti {
+            // For multi-day, end date should be the last day (parsed as date-only)
+            end = parseDate(endDatetime, eventTimeZone: eventTimeZone) ?? start.addingTimeInterval(86400)
+        } else {
+            end = parseDate(endDatetime, eventTimeZone: eventTimeZone) ?? start.addingTimeInterval(7200)
+        }
 
         return EventDetails(
             title: title ?? "Untitled Event",
@@ -64,30 +80,34 @@ struct EventDetailsDTO: Decodable {
             venue: venue ?? "",
             address: address ?? "",
             eventDescription: description ?? "",
-            timezone: timezone
+            timezone: timezone,
+            isAllDay: isMulti,
+            eventDates: eventDates ?? []
         )
     }
 
     private func parseDate(_ string: String?, eventTimeZone: TimeZone?) -> Date? {
         guard let string else { return nil }
 
-        // Try ISO 8601 with explicit timezone offset (e.g., 2026-03-20T19:00:00+01:00)
-        // These are already unambiguous, so parse as-is
+        // Try ISO 8601 with explicit timezone offset
         let isoFormatter = ISO8601DateFormatter()
         isoFormatter.formatOptions = [.withInternetDateTime]
         if let date = isoFormatter.date(from: string) { return date }
 
-        // For dates WITHOUT timezone offset, interpret in the event's timezone
-        // (e.g., "2026-03-20T19:00:00" with timezone "Europe/Paris" means 19:00 Paris time)
         let tz = eventTimeZone ?? .current
         let dateFormatter = DateFormatter()
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
         dateFormatter.timeZone = tz
 
+        // Try datetime formats
         for format in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm"] {
             dateFormatter.dateFormat = format
             if let date = dateFormatter.date(from: string) { return date }
         }
+
+        // Try date-only format (for multi-day events)
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        if let date = dateFormatter.date(from: string) { return date }
 
         return nil
     }
