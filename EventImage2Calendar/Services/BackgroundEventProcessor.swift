@@ -286,25 +286,36 @@ class BackgroundEventProcessor {
         SharedContainerService.writeDebugLog("Enrichment: needed (venue=\(venueIsVague), addr=\(addressIsEmpty), desc=\(descriptionIsShort))")
 
         // Search for the event's own page
-        guard let resultURL = await WebSearchService.searchForEventPage(
+        guard let searchResult = await WebSearchService.searchForEventPage(
             title: details.title, venue: details.venue, address: details.address
         ) else {
             SharedContainerService.writeDebugLog("Enrichment: no search results found")
             return details
         }
 
-        SharedContainerService.writeDebugLog("Enrichment: found \(resultURL.prefix(100))")
+        SharedContainerService.writeDebugLog("Enrichment: found url=\(searchResult.url?.prefix(80) ?? "nil"), snippets=\(searchResult.snippets.count) chars")
 
-        // Fetch the page content
-        guard let page = await fetchPageContent(from: resultURL),
-              let bodyText = page.bodyText, !bodyText.isEmpty else {
-            SharedContainerService.writeDebugLog("Enrichment: could not fetch page content")
-            return details
+        // Try to fetch the page content
+        var fullText: String = ""
+        if let resultURL = searchResult.url {
+            if let page = await fetchPageContent(from: resultURL),
+               let bodyText = page.bodyText, !bodyText.isEmpty {
+                fullText = combineContext(
+                    pageTitle: page.pageTitle, bodyText: bodyText, ogText: page.ogText
+                )
+            }
         }
 
-        let fullText = combineContext(
-            pageTitle: page.pageTitle, bodyText: bodyText, ogText: page.ogText
-        )
+        // Fall back to search snippets if page fetch failed or returned nothing
+        if fullText.isEmpty && !searchResult.snippets.isEmpty {
+            SharedContainerService.writeDebugLog("Enrichment: using search snippets as fallback")
+            fullText = "Search results for this event:\n\(searchResult.snippets)"
+        }
+
+        guard !fullText.isEmpty else {
+            SharedContainerService.writeDebugLog("Enrichment: no content available")
+            return details
+        }
 
         // Ask Claude to enrich
         do {
