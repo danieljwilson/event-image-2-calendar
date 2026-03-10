@@ -11,6 +11,8 @@ class EventDetails {
     var timezone: String?
     var isAllDay: Bool
     var eventDates: [String]
+    /// False when no date/time was found during extraction (startDate is a placeholder).
+    var hasExplicitDate: Bool
 
     init(
         title: String = "",
@@ -21,7 +23,8 @@ class EventDetails {
         eventDescription: String = "",
         timezone: String? = nil,
         isAllDay: Bool = false,
-        eventDates: [String] = []
+        eventDates: [String] = [],
+        hasExplicitDate: Bool = true
     ) {
         self.title = title
         self.startDate = startDate
@@ -32,6 +35,7 @@ class EventDetails {
         self.timezone = timezone
         self.isAllDay = isAllDay
         self.eventDates = eventDates
+        self.hasExplicitDate = hasExplicitDate
     }
 }
 
@@ -64,10 +68,10 @@ struct EventDetailsDTO: Decodable {
         let eventTimeZone: TimeZone? = timezone.flatMap { TimeZone(identifier: $0) }
         let isMulti = isMultiDay ?? false
 
-        let start = parseDate(startDatetime, eventTimeZone: eventTimeZone) ?? Date()
+        let parsedStart = parseDate(startDatetime, eventTimeZone: eventTimeZone)
+        let start = parsedStart ?? Date()
         let end: Date
         if isMulti {
-            // For multi-day, end date should be the last day (parsed as date-only)
             end = parseDate(endDatetime, eventTimeZone: eventTimeZone) ?? start.addingTimeInterval(86400)
         } else {
             end = parseDate(endDatetime, eventTimeZone: eventTimeZone) ?? start.addingTimeInterval(7200)
@@ -82,7 +86,8 @@ struct EventDetailsDTO: Decodable {
             eventDescription: description ?? "",
             timezone: timezone,
             isAllDay: isMulti,
-            eventDates: eventDates ?? []
+            eventDates: eventDates ?? [],
+            hasExplicitDate: parsedStart != nil
         )
     }
 

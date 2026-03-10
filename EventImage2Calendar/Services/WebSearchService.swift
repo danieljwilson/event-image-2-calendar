@@ -11,7 +11,7 @@ enum WebSearchService {
     }
 
     struct SearchResult {
-        var url: String?       // First relevant result URL
+        var urls: [String]     // Top relevant result URLs (up to 3)
         var snippets: String   // Combined snippet text from top results
     }
 
@@ -86,7 +86,7 @@ enum WebSearchService {
             }
         }
 
-        var firstURL: String?
+        var resultURLs: [String] = []
 
         for match in matches.prefix(5) {
             guard let urlRange = Range(match.range(at: 1), in: html) else { continue }
@@ -112,13 +112,13 @@ enum WebSearchService {
 
             // Skip social media sites — we want the event's own page
             if skipDomains.contains(where: { actualURL.contains($0) }) { continue }
-            if actualURL.hasPrefix("http") && firstURL == nil {
-                firstURL = actualURL
+            if actualURL.hasPrefix("http") && resultURLs.count < 3 {
+                resultURLs.append(actualURL)
             }
         }
 
         let combinedSnippets = snippetTexts.joined(separator: "\n")
-        guard firstURL != nil || !combinedSnippets.isEmpty else { return nil }
-        return SearchResult(url: firstURL, snippets: combinedSnippets)
+        guard !resultURLs.isEmpty || !combinedSnippets.isEmpty else { return nil }
+        return SearchResult(urls: resultURLs, snippets: combinedSnippets)
     }
 }

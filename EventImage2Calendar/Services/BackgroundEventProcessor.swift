@@ -273,38 +273,35 @@ class BackgroundEventProcessor {
         _ details: EventDetails,
         location: CLLocationCoordinate2D?
     ) async -> EventDetails {
-        let vagueVenueKeywords = ["event venue", "cinema or", "tbd", "unknown", "venue in"]
-        let venueIsVague = details.venue.isEmpty ||
-            vagueVenueKeywords.contains(where: { details.venue.lowercased().contains($0) })
-        let addressIsEmpty = details.address.isEmpty
-        let descriptionIsShort = details.eventDescription.count < 80
-        // Start date within 24h of now likely means Claude hallucinated today's date
-        let dateIsSuspicious = abs(details.startDate.timeIntervalSince(Date())) < 86400
+        let dateMissing = !details.hasExplicitDate
+        let dateIsHallucinated = abs(details.startDate.timeIntervalSince(Date())) < 600
 
-        guard venueIsVague || addressIsEmpty || descriptionIsShort || dateIsSuspicious else {
-            return details  // Details are already good enough
-        }
-
-        SharedContainerService.writeDebugLog("Enrichment: needed (venue=\(venueIsVague), addr=\(addressIsEmpty), desc=\(descriptionIsShort), date=\(dateIsSuspicious))")
+        // Always enrich — let Claude verify venue/address/dates against web data.
+        // The cost is one extra API call + search, but accuracy is much better.
+        SharedContainerService.writeDebugLog("Enrichment: running (dateMissing=\(dateMissing), dateHallucinated=\(dateIsHallucinated))")
 
         // Search for the event's own page
+        // Don't include venue in search — it's what we're trying to verify/find.
+        // Title + city is enough to find the event's page.
         guard let searchResult = await WebSearchService.searchForEventPage(
-            title: details.title, venue: details.venue, address: details.address
+            title: details.title, venue: "", address: details.address
         ) else {
             SharedContainerService.writeDebugLog("Enrichment: no search results found")
             return details
         }
 
-        SharedContainerService.writeDebugLog("Enrichment: found url=\(searchResult.url?.prefix(80) ?? "nil"), snippets=\(searchResult.snippets.count) chars")
+        SharedContainerService.writeDebugLog("Enrichment: found \(searchResult.urls.count) URLs, snippets=\(searchResult.snippets.count) chars")
 
-        // Try to fetch the page content
+        // Try to fetch page content from each result URL until one works
         var fullText: String = ""
-        if let resultURL = searchResult.url {
+        for resultURL in searchResult.urls {
+            SharedContainerService.writeDebugLog("Enrichment: trying \(resultURL.prefix(80))")
             if let page = await fetchPageContent(from: resultURL),
                let bodyText = page.bodyText, !bodyText.isEmpty {
                 fullText = combineContext(
                     pageTitle: page.pageTitle, bodyText: bodyText, ogText: page.ogText
                 )
+                break
             }
         }
 
@@ -322,7 +319,8 @@ class BackgroundEventProcessor {
         // Ask Claude to enrich
         do {
             let enriched = try await ClaudeAPIService.enrichEventDetails(
-                current: details, pageText: fullText, location: location
+                current: details, pageText: fullText, location: location,
+                dateIsPlaceholder: dateMissing || dateIsHallucinated
             )
             SharedContainerService.writeDebugLog("Enrichment: success — venue=\(enriched.venue), addr=\(enriched.address.prefix(50))")
             return enriched

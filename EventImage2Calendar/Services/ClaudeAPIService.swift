@@ -250,22 +250,27 @@ enum ClaudeAPIService {
     static func enrichEventDetails(
         current: EventDetails,
         pageText: String,
-        location: CLLocationCoordinate2D?
+        location: CLLocationCoordinate2D?,
+        dateIsPlaceholder: Bool = false
     ) async throws -> EventDetails {
         let apiKey = APIKeyStorage.getAPIKey()
         guard !apiKey.isEmpty else { throw ClaudeAPIError.noAPIKey }
 
         let systemPrompt = """
         You are enriching an event's details using additional information found on a web page. \
-        The user already has a partially-extracted event. Your job is to fill in missing or vague fields \
-        using the web page content provided. Do NOT change fields that already have good, specific values.
+        The user already has a partially-extracted event. Your job is to verify and improve ALL fields \
+        using the web page content provided.
 
         Rules:
-        - If the current venue is vague (e.g., "Cinema or Event Venue", "TBD", "Unknown"), replace it with the specific venue from the page.
-        - If the address is empty or vague, fill it in with the specific address from the page.
-        - If the description is short, add relevant details from the page (but keep it concise, 2-4 sentences).
+        - VENUE must be an actual place name (e.g., "Théâtre de la Photographie et de l'Image", "Palais des Festivals", \
+        "Salle Nikaïa"). If the current venue is a description of the event type (e.g., "La voile de compétition sur écran géant"), \
+        a generic category (e.g., "Cinema or Film Venue"), or a placeholder ("TBD", "Venue to be confirmed", "Unknown"), \
+        replace it with the specific venue name from the page.
+        - ADDRESS must be a street address or at minimum a city. If empty or just a country, fill it in.
+        - DESCRIPTION: If short, add relevant details (but keep it concise, 2-4 sentences). Include ticket info or URLs if found.
         - Do NOT change the title unless the page clearly shows a better/more complete name.
-        - If the current dates appear to be wrong (e.g., today's date or current time, which suggests a placeholder), replace them with the correct dates from the page content. Otherwise, keep existing dates that look correct.
+        - If the current dates appear to be wrong (e.g., today's date, which suggests a placeholder), \
+        replace them with the correct dates from the page content. Otherwise, keep existing dates.
         - Preserve the timezone.
 
         Respond with ONLY a JSON object, no markdown fences. Use this schema:
@@ -282,11 +287,23 @@ enum ClaudeAPIService {
         }
         """
 
+        let dateLine: String
+        if !current.hasExplicitDate || dateIsPlaceholder {
+            dateLine = """
+            - Start: UNKNOWN (placeholder — must be replaced with the correct date from the page)
+            - End: UNKNOWN (placeholder — must be replaced with the correct date from the page)
+            """
+        } else {
+            dateLine = """
+            - Start: \(Self.formatDate(current.startDate))
+            - End: \(Self.formatDate(current.endDate))
+            """
+        }
+
         let currentJSON = """
         Current event details:
         - Title: \(current.title)
-        - Start: \(Self.formatDate(current.startDate))
-        - End: \(Self.formatDate(current.endDate))
+        \(dateLine)\
         - Venue: \(current.venue)
         - Address: \(current.address)
         - Description: \(current.eventDescription)
