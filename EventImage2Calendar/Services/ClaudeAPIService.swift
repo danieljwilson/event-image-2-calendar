@@ -128,7 +128,9 @@ enum ClaudeAPIService {
         - When is_multi_day is false, event_dates should be an empty array [].
         - For timed events (vernissage, concert, etc.), always set is_multi_day to false even if there is also a date range on the poster.
 
-        If a field cannot be determined from the image, use your best guess based on context or set to null. \
+        If a field cannot be determined, set it to null. \
+        For start_datetime and end_datetime: ONLY extract dates/times that are explicitly shown or clearly implied. \
+        If no date or time is visible, set both to null — do NOT default to today's date or the current time. \
         For dates without a year, assume the nearest future occurrence.
         """
 
@@ -263,7 +265,7 @@ enum ClaudeAPIService {
         - If the address is empty or vague, fill it in with the specific address from the page.
         - If the description is short, add relevant details from the page (but keep it concise, 2-4 sentences).
         - Do NOT change the title unless the page clearly shows a better/more complete name.
-        - Do NOT change dates/times unless the page clearly contradicts them with more specific information.
+        - If the current dates appear to be wrong (e.g., today's date or current time, which suggests a placeholder), replace them with the correct dates from the page content. Otherwise, keep existing dates that look correct.
         - Preserve the timezone.
 
         Respond with ONLY a JSON object, no markdown fences. Use this schema:
@@ -389,7 +391,9 @@ enum ClaudeAPIService {
         - When is_multi_day is true, list ALL individual dates in event_dates array.
         - When is_multi_day is false, event_dates should be an empty array [].
 
-        If a field cannot be determined from the text, use your best guess based on context or set to null. \
+        If a field cannot be determined, set it to null. \
+        For start_datetime and end_datetime: ONLY extract dates/times that are explicitly shown or clearly implied. \
+        If no date or time is visible, set both to null — do NOT default to today's date or the current time. \
         For dates without a year, assume the nearest future occurrence.
         """
 

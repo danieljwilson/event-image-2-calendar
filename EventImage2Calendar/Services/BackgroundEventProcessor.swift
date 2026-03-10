@@ -278,12 +278,14 @@ class BackgroundEventProcessor {
             vagueVenueKeywords.contains(where: { details.venue.lowercased().contains($0) })
         let addressIsEmpty = details.address.isEmpty
         let descriptionIsShort = details.eventDescription.count < 80
+        // Start date within 24h of now likely means Claude hallucinated today's date
+        let dateIsSuspicious = abs(details.startDate.timeIntervalSince(Date())) < 86400
 
-        guard venueIsVague || addressIsEmpty || descriptionIsShort else {
+        guard venueIsVague || addressIsEmpty || descriptionIsShort || dateIsSuspicious else {
             return details  // Details are already good enough
         }
 
-        SharedContainerService.writeDebugLog("Enrichment: needed (venue=\(venueIsVague), addr=\(addressIsEmpty), desc=\(descriptionIsShort))")
+        SharedContainerService.writeDebugLog("Enrichment: needed (venue=\(venueIsVague), addr=\(addressIsEmpty), desc=\(descriptionIsShort), date=\(dateIsSuspicious))")
 
         // Search for the event's own page
         guard let searchResult = await WebSearchService.searchForEventPage(
