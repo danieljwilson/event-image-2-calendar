@@ -62,7 +62,8 @@ enum ClaudeAPIService {
 
     static func extractEvent(
         imageData: Data,
-        location: CLLocationCoordinate2D?
+        location: CLLocationCoordinate2D?,
+        additionalContext: String? = nil
     ) async throws -> EventDetails {
         let apiKey = APIKeyStorage.getAPIKey()
         guard !apiKey.isEmpty else { throw ClaudeAPIError.noAPIKey }
@@ -131,12 +132,24 @@ enum ClaudeAPIService {
         For dates without a year, assume the nearest future occurrence.
         """
 
+        let contextBlock: String
+        if let additionalContext, !additionalContext.isEmpty {
+            contextBlock = """
+
+            Additional context from the source page:
+            \(additionalContext)
+            """
+        } else {
+            contextBlock = ""
+        }
+
         let userText = """
         Extract the PRIMARY ATTENDABLE EVENT from this poster image. \
         If there are multiple dates (e.g., an opening reception AND an exhibition run), \
         extract the specific timed event that someone would attend, not the date range.
 
         \(locationContext)
+        \(contextBlock)
 
         Today's date is \(Self.todayString()) for reference.
         """
@@ -213,6 +226,188 @@ enum ClaudeAPIService {
         \(locationContext)
 
         Today's date is \(Self.todayString()) for reference.
+        """
+
+        let requestBody: [String: Any] = [
+            "model": "claude-haiku-4-5",
+            "max_tokens": 1024,
+            "system": systemPrompt,
+            "messages": [
+                [
+                    "role": "user",
+                    "content": userText
+                ]
+            ]
+        ]
+
+        return try await sendRequest(requestBody)
+    }
+
+    // MARK: - Enrichment (fill in sparse details using web search results)
+
+    static func enrichEventDetails(
+        current: EventDetails,
+        pageText: String,
+        location: CLLocationCoordinate2D?
+    ) async throws -> EventDetails {
+        let apiKey = APIKeyStorage.getAPIKey()
+        guard !apiKey.isEmpty else { throw ClaudeAPIError.noAPIKey }
+
+        let systemPrompt = """
+        You are enriching an event's details using additional information found on a web page. \
+        The user already has a partially-extracted event. Your job is to fill in missing or vague fields \
+        using the web page content provided. Do NOT change fields that already have good, specific values.
+
+        Rules:
+        - If the current venue is vague (e.g., "Cinema or Event Venue", "TBD", "Unknown"), replace it with the specific venue from the page.
+        - If the address is empty or vague, fill it in with the specific address from the page.
+        - If the description is short, add relevant details from the page (but keep it concise, 2-4 sentences).
+        - Do NOT change the title unless the page clearly shows a better/more complete name.
+        - Do NOT change dates/times unless the page clearly contradicts them with more specific information.
+        - Preserve the timezone.
+
+        Respond with ONLY a JSON object, no markdown fences. Use this schema:
+        {
+          "title": "...",
+          "start_datetime": "ISO 8601",
+          "end_datetime": "ISO 8601",
+          "venue": "...",
+          "address": "...",
+          "description": "...",
+          "timezone": "...",
+          "is_multi_day": false,
+          "event_dates": []
+        }
+        """
+
+        let currentJSON = """
+        Current event details:
+        - Title: \(current.title)
+        - Start: \(Self.formatDate(current.startDate))
+        - End: \(Self.formatDate(current.endDate))
+        - Venue: \(current.venue)
+        - Address: \(current.address)
+        - Description: \(current.eventDescription)
+        - Timezone: \(current.timezone ?? "unknown")
+        """
+
+        let truncatedPage = String(pageText.prefix(4000))
+
+        let userText = """
+        Enrich this event using the web page content below. Fill in any vague or missing fields.
+
+        \(currentJSON)
+
+        --- Web page content ---
+        \(truncatedPage)
+        """
+
+        let requestBody: [String: Any] = [
+            "model": "claude-haiku-4-5",
+            "max_tokens": 1024,
+            "system": systemPrompt,
+            "messages": [
+                [
+                    "role": "user",
+                    "content": userText
+                ]
+            ]
+        ]
+
+        return try await sendRequest(requestBody)
+    }
+
+    private static func formatDate(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate, .withTime, .withDashSeparatorInDate, .withColonSeparatorInTime]
+        return formatter.string(from: date)
+    }
+
+    // MARK: - Text-based extraction (for page content scraped from URLs)
+
+    static func extractEventFromText(
+        text: String,
+        sourceURL: String?,
+        location: CLLocationCoordinate2D?
+    ) async throws -> EventDetails {
+        let apiKey = APIKeyStorage.getAPIKey()
+        guard !apiKey.isEmpty else { throw ClaudeAPIError.noAPIKey }
+
+        let locationContext: String
+        if let loc = location {
+            locationContext = """
+            The user is currently located at latitude \(loc.latitude), longitude \(loc.longitude). \
+            Use this to help identify the city/region if not evident from the content.
+            """
+        } else {
+            locationContext = "No location data available."
+        }
+
+        let systemPrompt = """
+        You are an expert event detail extractor specializing in cultural and social events. \
+        Analyze the provided web page text and extract the PRIMARY ATTENDABLE EVENT — the specific \
+        occasion a person would go to at a particular date and time.
+
+        CRITICAL RULES FOR EVENT IDENTIFICATION:
+        1. PRIORITIZE events with SPECIFIC TIMES (e.g., "19h", "7pm", "doors open 20:00") over date ranges.
+        2. A "vernissage" (opening night/reception) IS the primary event, NOT the exhibition run dates.
+        3. A "launch party", "opening night", "premiere", or "kickoff" is the event, not the season/run.
+        4. If the text mentions BOTH an event with a specific time AND a date range, extract the TIMED event. \
+           Mention the date range in the description field only.
+        5. Date ranges (e.g., "21/03 - 02/04") are exhibition/festival durations — include them in \
+           the description but do NOT use them as start/end dates unless no specific timed event exists.
+        6. If ONLY a date range exists with no specific timed event, set is_multi_day to true. \
+           Set start_datetime to the first date and end_datetime to the last date (date-only format "YYYY-MM-DD"). \
+           List each individual date in event_dates.
+
+        CULTURAL TERMS TO RECOGNIZE:
+        - "Vernissage" / "Finissage" = opening/closing reception event (typically 2-3 hours)
+        - "Inauguration" = opening ceremony
+        - "Soirée" = evening event
+        - "Apéro" / "Apéritif" = drinks reception (typically 1.5-2 hours)
+        - "Conférence" / "Table ronde" = talk/panel (typically 1.5-2 hours)
+
+        END TIME RULES (for timed events only, not multi-day):
+        - If no end time is specified, default to start time + 2 hours.
+        - If the event type implies a known duration (concert = 3h, reception/vernissage = 2h, talk = 1.5h), use that.
+        - NEVER set the end date to a different day unless explicitly stated as an overnight event.
+
+        Respond with ONLY a JSON object, no markdown fences, no other text. Use this exact schema:
+        {
+          "title": "Event title (include event type if applicable, e.g., 'Vernissage: OTOM Solo Show')",
+          "start_datetime": "ISO 8601 datetime (e.g., 2026-03-20T19:00:00) or date-only for multi-day (e.g., 2026-05-02)",
+          "end_datetime": "ISO 8601 datetime (e.g., 2026-03-20T21:00:00) or date-only for multi-day (e.g., 2026-05-03)",
+          "venue": "Venue name",
+          "address": "Full address including city, postal code, state/country",
+          "description": "Brief description (1-3 sentences). Include the source URL if provided.",
+          "timezone": "IANA timezone (e.g., Europe/Paris)",
+          "is_multi_day": false,
+          "event_dates": ["2026-05-02", "2026-05-03"]
+        }
+        MULTI-DAY RULES:
+        - Set is_multi_day to true ONLY when the event spans multiple days with no single specific timed event.
+        - When is_multi_day is true, list ALL individual dates in event_dates array.
+        - When is_multi_day is false, event_dates should be an empty array [].
+
+        If a field cannot be determined from the text, use your best guess based on context or set to null. \
+        For dates without a year, assume the nearest future occurrence.
+        """
+
+        let truncatedText = String(text.prefix(4000))
+        let urlNote = sourceURL.map { "\nSource URL: \($0)" } ?? ""
+
+        let userText = """
+        Extract the PRIMARY ATTENDABLE EVENT from this web page content. \
+        If there are multiple dates (e.g., an opening reception AND an exhibition run), \
+        extract the specific timed event that someone would attend, not the date range.
+
+        \(locationContext)
+        \(urlNote)
+
+        Today's date is \(Self.todayString()) for reference.
+
+        --- Page content ---
+        \(truncatedText)
         """
 
         let requestBody: [String: Any] = [

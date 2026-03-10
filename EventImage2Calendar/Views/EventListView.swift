@@ -8,6 +8,7 @@ struct EventListView: View {
     @State private var processor = BackgroundEventProcessor()
     @State private var showCamera = true
     @State private var showLibrary = false
+    @State private var showDebugLog = false
 
     var body: some View {
         NavigationStack {
@@ -19,6 +20,38 @@ struct EventListView: View {
                 }
             }
             .navigationTitle("Events")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showDebugLog = true
+                    } label: {
+                        Image(systemName: "ladybug")
+                    }
+                }
+            }
+            .sheet(isPresented: $showDebugLog) {
+                NavigationStack {
+                    ScrollView {
+                        Text(SharedContainerService.readDebugLog() ?? "No debug log available")
+                            .font(.caption.monospaced())
+                            .padding()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .navigationTitle("Share Debug Log")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Clear") {
+                                SharedContainerService.clearDebugLog()
+                                showDebugLog = false
+                            }
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showDebugLog = false }
+                        }
+                    }
+                }
+            }
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 12) {
                     Button {

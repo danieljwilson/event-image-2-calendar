@@ -47,10 +47,16 @@ class ShareViewController: UIViewController {
             var savedURL: String?
             var savedText: String?
 
+            SharedContainerService.writeDebugLog("--- New share session ---")
+            SharedContainerService.writeDebugLog("Extension items: \(extensionItems.count)")
+
             for item in extensionItems {
                 guard let attachments = item.attachments else { continue }
+                SharedContainerService.writeDebugLog("Attachments: \(attachments.count)")
 
-                for provider in attachments {
+                for (index, provider) in attachments.enumerated() {
+                    SharedContainerService.writeDebugLog("Provider[\(index)] types: \(provider.registeredTypeIdentifiers)")
+
                     // Collect image (a provider can conform to multiple types)
                     if collectedImageData == nil &&
                        provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
@@ -75,7 +81,20 @@ class ShareViewController: UIViewController {
                 }
             }
 
+            // Extract URL from text if no URL attachment found (Instagram embeds URLs in text)
+            if savedURL == nil, let text = savedText {
+                if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
+                    let range = NSRange(text.startIndex..., in: text)
+                    if let match = detector.firstMatch(in: text, range: range),
+                       let urlRange = Range(match.range, in: text) {
+                        savedURL = String(text[urlRange])
+                        SharedContainerService.writeDebugLog("Extracted URL from text: \(savedURL!)")
+                    }
+                }
+            }
+
             // Single save: pass both image and URL when both are available
+            SharedContainerService.writeDebugLog("Results: image=\(collectedImageData != nil), url=\(savedURL ?? "nil"), text=\(savedText != nil)")
             var didSave = false
             if let imageData = collectedImageData {
                 let _ = try? SharedContainerService.savePendingShare(
@@ -117,35 +136,30 @@ class ShareViewController: UIViewController {
     // MARK: - Item loading helpers
 
     private func loadImage(from provider: NSItemProvider) async -> Data? {
-        // Modern API — handles Photos library, PHAsset-backed items, etc.
-        if provider.canLoadObject(ofClass: UIImage.self) {
-            let image: UIImage? = await withCheckedContinuation { continuation in
-                provider.loadObject(ofClass: UIImage.self) { object, _ in
-                    continuation.resume(returning: object as? UIImage)
+        // Use loadDataRepresentation + ImageIO downsampling to avoid
+        // decompressing full-resolution images (which crashes share extensions)
+        for typeId in provider.registeredTypeIdentifiers {
+            guard UTType(typeId)?.conforms(to: .image) == true else { continue }
+            SharedContainerService.writeDebugLog("  Trying loadDataRepresentation for \(typeId)")
+            let rawData: Data? = await withCheckedContinuation { continuation in
+                provider.loadDataRepresentation(forTypeIdentifier: typeId) { data, error in
+                    if let error {
+                        SharedContainerService.writeDebugLog("  loadDataRepresentation error: \(error.localizedDescription)")
+                    }
+                    continuation.resume(returning: data)
                 }
             }
-            if let image, let data = image.resizedForAPI() {
-                return data
-            }
-        }
-
-        // Legacy fallback for providers that don't support loadObject
-        return await withCheckedContinuation { continuation in
-            provider.loadItem(forTypeIdentifier: UTType.image.identifier, options: nil) { item, _ in
-                var imageData: Data?
-                if let url = item as? URL,
-                   let data = try? Data(contentsOf: url),
-                   let image = UIImage(data: data) {
-                    imageData = image.resizedForAPI()
-                } else if let image = item as? UIImage {
-                    imageData = image.resizedForAPI()
-                } else if let data = item as? Data,
-                          let image = UIImage(data: data) {
-                    imageData = image.resizedForAPI()
+            if let rawData {
+                SharedContainerService.writeDebugLog("  Got \(rawData.count) bytes, downsampling...")
+                if let resized = ImageResizer.downsample(data: rawData) {
+                    SharedContainerService.writeDebugLog("  Downsample success: \(resized.count) bytes")
+                    return resized
                 }
-                continuation.resume(returning: imageData)
+                SharedContainerService.writeDebugLog("  Downsample failed")
             }
         }
+        SharedContainerService.writeDebugLog("  All image loading strategies failed")
+        return nil
     }
 
     private func loadURL(from provider: NSItemProvider) async -> URL? {

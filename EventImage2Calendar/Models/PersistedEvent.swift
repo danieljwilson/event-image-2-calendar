@@ -32,6 +32,7 @@ final class PersistedEvent {
     var isAllDay: Bool
     var eventDatesRaw: String?
     var sourceURL: String?
+    var sourceText: String?
 
     static let maxRetryCount = 5
     static let stuckProcessingTimeout: TimeInterval = 300
@@ -104,6 +105,7 @@ final class PersistedEvent {
         self.isAllDay = isAllDay
         self.eventDatesRaw = nil
         self.sourceURL = nil
+        self.sourceText = nil
     }
 
     func applyExtraction(_ details: EventDetails) {

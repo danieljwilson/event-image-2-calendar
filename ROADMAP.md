@@ -23,6 +23,10 @@ Status of Event Snap features and the path to a production-ready App Store relea
 - [x] File-based handoff via App Groups
 - [x] Darwin notification for real-time pickup
 - [x] URL-based event extraction (Eventbrite, Meetup, etc.)
+- [x] Memory-efficient image handling via ImageIO downsampling (share extension safe)
+- [x] Multi-strategy page content fetching (desktop UA → Facebook crawler UA → Instagram embed)
+- [x] Text-based extraction from page content when no image available
+- [x] OG metadata extraction (image, title, description) with HTML body text fallback
 
 ### Digest Pipeline
 - [x] Cloudflare Worker with authenticated event ingestion

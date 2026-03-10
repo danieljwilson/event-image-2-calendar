@@ -72,7 +72,7 @@ EventImage2Calendar/                      # Main app target
 │   ├── EventDetails.swift                # @Observable event model (in-memory) + DTO
 │   └── PersistedEvent.swift              # SwiftData @Model + EventStatus enum
 ├── Services/
-│   ├── ClaudeAPIService.swift            # Claude Messages API client (vision + URL)
+│   ├── ClaudeAPIService.swift            # Claude Messages API client (vision + text + URL)
 │   ├── CalendarService.swift             # Google Calendar URL + .ics generation
 │   ├── BackgroundEventProcessor.swift    # Background API calls + SwiftData persistence
 │   ├── LocationService.swift             # CLLocationManager wrapper
@@ -163,12 +163,23 @@ The Share Extension is a lightweight UIKit-based app extension (~120MB memory li
 
 ## Claude API Integration
 
-Two extraction modes in `ClaudeAPIService`:
+Three extraction modes in `ClaudeAPIService`:
 
-- **Image extraction** (`extractEvent`): Sends base64 JPEG + structured prompt. Prompt prioritizes specific timed events (vernissage, concert) over date ranges. Recognizes cultural terms (vernissage, finissage, apéro, etc.).
-- **URL extraction** (`extractEventFromURL`): Sends URL string for inference from URL structure and platform knowledge (Eventbrite, Meetup, etc.).
+- **Image extraction** (`extractEvent`): Sends base64 JPEG + structured prompt. Prompt prioritizes specific timed events (vernissage, concert) over date ranges. Recognizes cultural terms (vernissage, finissage, apéro, etc.). Optional `additionalContext` text appended to user prompt (e.g., OG metadata from source page).
+- **Text extraction** (`extractEventFromText`): Sends page text content scraped from a URL. Uses the same detailed system prompt as image extraction. Truncates input to 4000 chars.
+- **URL extraction** (`extractEventFromURL`): Last-resort fallback — sends bare URL string for inference from URL structure/platform knowledge. Rarely used since page text extraction usually succeeds.
 
-Both use shared `sendRequest()` for HTTP handling and JSON parsing via `EventDetailsDTO`. Network errors from `URLSession` are wrapped into `ClaudeAPIError.apiError` for consistent error classification. Empty extractions (all key fields nil) throw `ClaudeAPIError.noEventFound`.
+All use shared `sendRequest()` for HTTP handling and JSON parsing via `EventDetailsDTO`. Network errors from `URLSession` are wrapped into `ClaudeAPIError.apiError` for consistent error classification. Empty extractions (all key fields nil) throw `ClaudeAPIError.noEventFound`.
+
+### URL Share Extraction Pipeline
+
+When a URL is shared (from Instagram, Safari, etc.), `BackgroundEventProcessor.extractFromURL` runs a multi-step fallback chain:
+
+1. **Fetch page content** (`fetchPageContent`): Tries desktop Safari UA first, then `facebookexternalhit/1.1` for Instagram. For Instagram URLs, also tries the `/embed/` endpoint. Extracts OG tags, `<title>`, and visible body text (HTML stripped).
+2. **OG image found** → download + downsample → send to Claude vision + OG text as context
+3. **No OG image but page text found** → send page text to `extractEventFromText`
+4. **No page content but share extension provided text** → send that to `extractEventFromText`
+5. **Last resort** → send bare URL to `extractEventFromURL`
 
 **Response schema:** `{ title, start_datetime, end_datetime, venue, address, description, timezone, is_multi_day, event_dates }`
 

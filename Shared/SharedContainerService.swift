@@ -87,6 +87,34 @@ enum SharedContainerService {
         }
     }
 
+    // MARK: - Debug log (written by extension, read by main app)
+
+    static func writeDebugLog(_ text: String) {
+        guard let container = containerURL else { return }
+        let logURL = container.appendingPathComponent("share_debug.log")
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let entry = "[\(timestamp)] \(text)\n"
+        if let handle = try? FileHandle(forWritingTo: logURL) {
+            handle.seekToEndOfFile()
+            handle.write(entry.data(using: .utf8) ?? Data())
+            handle.closeFile()
+        } else {
+            try? entry.data(using: .utf8)?.write(to: logURL)
+        }
+    }
+
+    static func readDebugLog() -> String? {
+        guard let container = containerURL else { return nil }
+        let logURL = container.appendingPathComponent("share_debug.log")
+        return try? String(contentsOf: logURL, encoding: .utf8)
+    }
+
+    static func clearDebugLog() {
+        guard let container = containerURL else { return }
+        let logURL = container.appendingPathComponent("share_debug.log")
+        try? FileManager.default.removeItem(at: logURL)
+    }
+
     enum ShareError: LocalizedError {
         case noContainer
         var errorDescription: String? { "Could not access shared container" }

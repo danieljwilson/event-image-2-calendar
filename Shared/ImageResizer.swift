@@ -1,4 +1,26 @@
 import UIKit
+import ImageIO
+
+enum ImageResizer {
+    /// Downsample compressed image data (HEIC/JPEG/PNG) via ImageIO.
+    /// Never decompresses the full image — safe for share extension memory limits.
+    static func downsample(data: Data, maxDimension: CGFloat = 1024) -> Data? {
+        let sourceOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions as CFDictionary) else {
+            return nil
+        }
+        let downsampleOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDimension
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions as CFDictionary) else {
+            return nil
+        }
+        return UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.7)
+    }
+}
 
 enum ImageResizeError: LocalizedError {
     case compressionFailed
