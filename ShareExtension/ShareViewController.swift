@@ -43,7 +43,7 @@ class ShareViewController: UIViewController {
         }
 
         Task {
-            var savedImage = false
+            var collectedImageData: Data?
             var savedURL: String?
             var savedText: String?
 
@@ -51,23 +51,23 @@ class ShareViewController: UIViewController {
                 guard let attachments = item.attachments else { continue }
 
                 for provider in attachments {
-                    // Priority 1: Images (screenshots, photos, etc.)
-                    if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
-                        if let imageData = await loadImage(from: provider) {
-                            let _ = try? SharedContainerService.savePendingShare(
-                                imageData: imageData, sourceURL: nil, sourceText: nil
-                            )
-                            savedImage = true
+                    // Collect image (a provider can conform to multiple types)
+                    if collectedImageData == nil &&
+                       provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                        if let data = await loadImage(from: provider) {
+                            collectedImageData = data
                         }
                     }
-                    // Priority 2: URLs (web pages, Instagram links, etc.)
-                    else if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+                    // Also collect URL (not else-if — same provider may have both)
+                    if savedURL == nil &&
+                       provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
                         if let url = await loadURL(from: provider) {
                             savedURL = url.absoluteString
                         }
                     }
-                    // Priority 3: Plain text
-                    else if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
+                    // Also collect text
+                    if savedText == nil &&
+                       provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
                         if let text = await loadText(from: provider) {
                             savedText = text
                         }
@@ -75,29 +75,37 @@ class ShareViewController: UIViewController {
                 }
             }
 
-            // Save URL-only or text-only shares if no image was saved
-            if !savedImage {
-                if let url = savedURL {
-                    let _ = try? SharedContainerService.savePendingShare(
-                        imageData: nil, sourceURL: url, sourceText: savedText
-                    )
-                } else if let text = savedText {
-                    let _ = try? SharedContainerService.savePendingShare(
-                        imageData: nil, sourceURL: nil, sourceText: text
-                    )
-                }
+            // Single save: pass both image and URL when both are available
+            var didSave = false
+            if let imageData = collectedImageData {
+                let _ = try? SharedContainerService.savePendingShare(
+                    imageData: imageData, sourceURL: savedURL, sourceText: savedText
+                )
+                didSave = true
+            } else if let url = savedURL {
+                let _ = try? SharedContainerService.savePendingShare(
+                    imageData: nil, sourceURL: url, sourceText: savedText
+                )
+                didSave = true
+            } else if let text = savedText {
+                let _ = try? SharedContainerService.savePendingShare(
+                    imageData: nil, sourceURL: nil, sourceText: text
+                )
+                didSave = true
             }
 
             // Notify main app via Darwin notification
-            let name = "com.eventsnap.newShareAvailable" as CFString
-            CFNotificationCenterPostNotification(
-                CFNotificationCenterGetDarwinNotifyCenter(),
-                CFNotificationName(name),
-                nil, nil, true
-            )
+            if didSave {
+                let name = "com.eventsnap.newShareAvailable" as CFString
+                CFNotificationCenterPostNotification(
+                    CFNotificationCenterGetDarwinNotifyCenter(),
+                    CFNotificationName(name),
+                    nil, nil, true
+                )
+            }
 
             await MainActor.run {
-                statusLabel.text = "Saved!"
+                statusLabel.text = didSave ? "Saved!" : "Could not process this content."
                 spinner.stopAnimating()
             }
 
@@ -109,7 +117,20 @@ class ShareViewController: UIViewController {
     // MARK: - Item loading helpers
 
     private func loadImage(from provider: NSItemProvider) async -> Data? {
-        await withCheckedContinuation { continuation in
+        // Modern API — handles Photos library, PHAsset-backed items, etc.
+        if provider.canLoadObject(ofClass: UIImage.self) {
+            let image: UIImage? = await withCheckedContinuation { continuation in
+                provider.loadObject(ofClass: UIImage.self) { object, _ in
+                    continuation.resume(returning: object as? UIImage)
+                }
+            }
+            if let image, let data = image.resizedForAPI() {
+                return data
+            }
+        }
+
+        // Legacy fallback for providers that don't support loadObject
+        return await withCheckedContinuation { continuation in
             provider.loadItem(forTypeIdentifier: UTType.image.identifier, options: nil) { item, _ in
                 var imageData: Data?
                 if let url = item as? URL,

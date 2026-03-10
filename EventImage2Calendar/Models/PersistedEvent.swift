@@ -31,6 +31,7 @@ final class PersistedEvent {
     var googleCalendarURL: String?
     var isAllDay: Bool
     var eventDatesRaw: String?
+    var sourceURL: String?
 
     static let maxRetryCount = 5
     static let stuckProcessingTimeout: TimeInterval = 300
@@ -102,6 +103,7 @@ final class PersistedEvent {
         self.googleCalendarURL = nil
         self.isAllDay = isAllDay
         self.eventDatesRaw = nil
+        self.sourceURL = nil
     }
 
     func applyExtraction(_ details: EventDetails) {

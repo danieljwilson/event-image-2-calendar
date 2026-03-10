@@ -47,7 +47,7 @@ class BackgroundEventProcessor {
         performExtraction(
             eventID: event.id,
             imageData: imageData,
-            sourceURL: nil,
+            sourceURL: event.sourceURL,
             context: context,
             taskName: "EventRetry",
             sendToDigest: false
@@ -60,13 +60,14 @@ class BackgroundEventProcessor {
         case .image:
             guard let imageData else { return }
             let event = PersistedEvent(status: .processing, imageData: imageData)
+            event.sourceURL = share.sourceURL
             context.insert(event)
             try? context.save()
 
             performExtraction(
                 eventID: event.id,
                 imageData: imageData,
-                sourceURL: nil,
+                sourceURL: share.sourceURL,
                 context: context,
                 taskName: "SharedImageExtraction",
                 sendToDigest: true
@@ -138,9 +139,16 @@ class BackgroundEventProcessor {
                 do {
                     let details: EventDetails
                     if let imageData {
-                        details = try await ClaudeAPIService.extractEvent(
-                            imageData: imageData, location: location
-                        )
+                        do {
+                            details = try await ClaudeAPIService.extractEvent(
+                                imageData: imageData, location: location
+                            )
+                        } catch ClaudeAPIError.noEventFound where sourceURL != nil {
+                            // Image extraction found nothing — fall back to URL extraction
+                            details = try await ClaudeAPIService.extractEventFromURL(
+                                urlString: sourceURL!, location: location
+                            )
+                        }
                     } else if let sourceURL {
                         details = try await ClaudeAPIService.extractEventFromURL(
                             urlString: sourceURL, location: location
