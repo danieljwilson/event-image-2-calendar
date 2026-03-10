@@ -345,10 +345,15 @@ class BackgroundEventProcessor {
            let ogImageData = await downloadAndDownsample(from: ogImageURL) {
             let context = combineContext(ogText: page.ogText, sourceText: sourceText)
             SharedContainerService.writeDebugLog("Extraction: OG image (\(ogImageData.count) bytes), context=\(context.count) chars")
-            return try await ClaudeAPIService.extractEvent(
-                imageData: ogImageData, location: location,
-                additionalContext: context.isEmpty ? nil : context
-            )
+            do {
+                return try await ClaudeAPIService.extractEvent(
+                    imageData: ogImageData, location: location,
+                    additionalContext: context.isEmpty ? nil : context
+                )
+            } catch ClaudeAPIError.noEventFound {
+                SharedContainerService.writeDebugLog("Extraction: OG image found nothing, trying text fallback")
+                // Fall through to step 2
+            }
         }
 
         // 2. If page text found (body text OR OG text) → text-based extraction
