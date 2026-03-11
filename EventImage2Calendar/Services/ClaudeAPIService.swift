@@ -342,7 +342,7 @@ enum ClaudeAPIService {
 
         let requestBody: [String: Any] = [
             "model": "claude-haiku-4-5",
-            "max_tokens": 1024,
+            "max_tokens": 2048,
             "system": systemPrompt,
             "messages": [
                 [
@@ -515,18 +515,89 @@ enum ClaudeAPIService {
         } catch let error as ClaudeAPIError {
             throw error
         } catch {
+            // Try truncation recovery: close open strings/objects
+            let recovered = repairTruncatedJSON(cleanJSON)
+            if recovered != cleanJSON, let recoveredData = recovered.data(using: .utf8),
+               let dto = try? JSONDecoder().decode(EventDetailsDTO.self, from: recoveredData) {
+                SharedContainerService.writeDebugLog("JSON recovered from truncation")
+                return dto.toEventDetails()
+            }
+            SharedContainerService.writeDebugLog("JSON decode failed. Raw: \(cleanJSON.prefix(500))")
             throw ClaudeAPIError.decodingFailed(error.localizedDescription)
         }
     }
 
-    /// Strip markdown fences and extract raw JSON
+    /// Strip markdown fences, trailing commas, and extract raw JSON
     private static func extractJSON(from text: String) -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let start = trimmed.firstIndex(of: "{"),
-              let end = trimmed.lastIndex(of: "}") else {
-            return trimmed
+        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Strip markdown code fences
+        cleaned = cleaned.replacingOccurrences(of: "```json", with: "")
+        cleaned = cleaned.replacingOccurrences(of: "```", with: "")
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Extract the JSON object
+        guard let start = cleaned.firstIndex(of: "{"),
+              let end = cleaned.lastIndex(of: "}") else {
+            return cleaned
         }
-        return String(trimmed[start...end])
+        var json = String(cleaned[start...end])
+
+        // Remove trailing commas before } or ] (common haiku issue)
+        if let regex = try? NSRegularExpression(pattern: #",\s*([}\]])"#) {
+            json = regex.stringByReplacingMatches(
+                in: json, range: NSRange(json.startIndex..., in: json),
+                withTemplate: "$1"
+            )
+        }
+
+        return json
+    }
+
+    /// Attempt to repair JSON truncated by max_tokens.
+    /// Drops the last incomplete key-value pair and closes the object.
+    private static func repairTruncatedJSON(_ json: String) -> String {
+        // If it already ends with }, it's not truncated
+        let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasSuffix("}") { return json }
+
+        // Find the last complete key-value pair (ends with a comma or closing bracket)
+        // Strategy: find the last complete value ending (", or ],)
+        var repaired = trimmed
+
+        // If we're inside a string value, close it
+        // Count unescaped quotes — if odd, we're mid-string
+        let quoteCount = repaired.filter { $0 == "\"" }.count
+        if quoteCount % 2 != 0 {
+            repaired += "\""
+        }
+
+        // Remove any trailing partial key-value
+        // Find last comma that's outside a string, truncate there, close
+        if let lastComma = repaired.lastIndex(of: ",") {
+            let afterComma = repaired[repaired.index(after: lastComma)...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            // If what follows the comma doesn't look like a complete value, truncate
+            if !afterComma.contains(":") || !afterComma.hasSuffix("\"") {
+                repaired = String(repaired[...lastComma])
+                // Remove the trailing comma
+                repaired = String(repaired.dropLast())
+            }
+        }
+
+        // Close any open arrays and the object
+        let openBrackets = repaired.filter { $0 == "[" }.count
+        let closeBrackets = repaired.filter { $0 == "]" }.count
+        for _ in 0..<(openBrackets - closeBrackets) {
+            repaired += "]"
+        }
+        let openBraces = repaired.filter { $0 == "{" }.count
+        let closeBraces = repaired.filter { $0 == "}" }.count
+        for _ in 0..<(openBraces - closeBraces) {
+            repaired += "}"
+        }
+
+        return repaired
     }
 
     private static func todayString() -> String {
