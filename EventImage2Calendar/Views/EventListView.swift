@@ -9,17 +9,42 @@ struct EventListView: View {
     @State private var showCamera = true
     @State private var showLibrary = false
     @State private var showDebugLog = false
+    @State private var selectedTab: Tab = .pending
+
+    enum Tab: String, CaseIterable {
+        case pending = "Pending"
+        case processed = "Processed"
+    }
+
+    private var pendingEvents: [PersistedEvent] {
+        events.filter { $0.status == .processing || $0.status == .ready || $0.status == .failed }
+    }
+
+    private var processedEvents: [PersistedEvent] {
+        events.filter { $0.status == .added }
+    }
 
     var body: some View {
         NavigationStack {
-            Group {
-                if events.isEmpty {
-                    emptyState
-                } else {
-                    eventList
+            VStack(spacing: 0) {
+                // Top: app branding + action buttons
+                topSection
+
+                // Tab content
+                Group {
+                    switch selectedTab {
+                    case .pending:
+                        pendingList
+                    case .processed:
+                        processedList
+                    }
                 }
+                .frame(maxHeight: .infinity)
+
+                // Bottom: tab bar
+                tabBar
             }
-            .navigationTitle("Events")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -52,30 +77,6 @@ struct EventListView: View {
                     }
                 }
             }
-            .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 12) {
-                    Button {
-                        showCamera = true
-                    } label: {
-                        Label("Take Photo", systemImage: "camera.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-
-                    Button {
-                        showLibrary = true
-                    } label: {
-                        Label("Choose from Library", systemImage: "photo.on.rectangle")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 8)
-                .background(.bar)
-            }
             .fullScreenCover(isPresented: $showCamera) {
                 ZStack(alignment: .topLeading) {
                     ImagePicker(sourceType: .camera) { image in
@@ -105,6 +106,9 @@ struct EventListView: View {
                 }
                 .ignoresSafeArea()
             }
+            .navigationDestination(for: UUID.self) { eventID in
+                EventDetailView(eventID: eventID, processor: processor)
+            }
         }
         .onAppear {
             processor.locationService.requestLocation()
@@ -124,11 +128,147 @@ struct EventListView: View {
         }
     }
 
-    private var emptyState: some View {
-        ContentUnavailableView {
-            Label("No Events", systemImage: "calendar.badge.plus")
-        } description: {
-            Text("Take a photo of an event poster to get started")
+    // MARK: - Top section
+
+    private var topSection: some View {
+        VStack(spacing: 10) {
+            Button {
+                showCamera = true
+            } label: {
+                Label("Take Photo", systemImage: "camera.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+
+            Button {
+                showLibrary = true
+            } label: {
+                Label("Choose from Library", systemImage: "photo.on.rectangle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+
+}
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+    }
+
+    // MARK: - Tab bar
+
+    private var tabBar: some View {
+        HStack(spacing: 0) {
+            ForEach(Tab.allCases, id: \.self) { tab in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedTab = tab
+                    }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: tab == .pending ? "tray.full" : "checkmark.circle")
+                            .font(.title3)
+                        Text(tab.rawValue)
+                            .font(.caption)
+                    }
+                    .foregroundStyle(selectedTab == tab ? .blue : .secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                }
+            }
+        }
+        .padding(.bottom, 4)
+        .background(.bar)
+    }
+
+    // MARK: - Pending list
+
+    private var pendingList: some View {
+        Group {
+            if pendingEvents.isEmpty {
+                ContentUnavailableView {
+                    Label("No Pending Events", systemImage: "tray")
+                } description: {
+                    Text("Take a photo of an event poster or share from another app")
+                }
+            } else {
+                List {
+                    ForEach(pendingEvents) { event in
+                        if event.status == .ready {
+                            NavigationLink(value: event.id) {
+                                EventRowView(event: event)
+                            }
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                Button {
+                                    CalendarService.openGoogleCalendar(event: event.toEventDetails())
+                                    event.status = .added
+                                    event.updatedAt = Date()
+                                } label: {
+                                    Label("Add", systemImage: "calendar.badge.plus")
+                                }
+                                .tint(.green)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    modelContext.delete(event)
+                                } label: {
+                                    Label("Dismiss", systemImage: "xmark")
+                                }
+                            }
+                        } else if event.status == .failed {
+                            EventRowView(event: event)
+                                .swipeActions(edge: .leading) {
+                                    if event.canRetry {
+                                        Button {
+                                            processor.retryEvent(event, context: modelContext)
+                                        } label: {
+                                            Label("Retry", systemImage: "arrow.clockwise")
+                                        }
+                                        .tint(.blue)
+                                    }
+                                }
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        modelContext.delete(event)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+                        } else {
+                            // Processing
+                            EventRowView(event: event)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Processed list
+
+    private var processedList: some View {
+        Group {
+            if processedEvents.isEmpty {
+                ContentUnavailableView {
+                    Label("No Processed Events", systemImage: "checkmark.circle")
+                } description: {
+                    Text("Events you add to your calendar will appear here")
+                }
+            } else {
+                List {
+                    ForEach(processedEvents) { event in
+                        NavigationLink(value: event.id) {
+                            EventRowView(event: event)
+                        }
+                    }
+                    .onDelete { offsets in
+                        for index in offsets {
+                            modelContext.delete(processedEvents[index])
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -142,6 +282,7 @@ struct EventListView: View {
         }
         if !pendingShares.isEmpty {
             showCamera = false
+            selectedTab = .pending
         }
     }
 
@@ -162,101 +303,5 @@ struct EventListView: View {
             nil,
             .deliverImmediately
         )
-    }
-
-    private var eventList: some View {
-        List {
-            let readyEvents = events.filter { $0.status == .ready }
-            if !readyEvents.isEmpty {
-                Section("Ready") {
-                    ForEach(readyEvents) { event in
-                        NavigationLink(value: event.id) {
-                            EventRowView(event: event)
-                        }
-                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                            Button {
-                                CalendarService.openGoogleCalendar(event: event.toEventDetails())
-                                event.status = .added
-                                event.updatedAt = Date()
-                            } label: {
-                                Label("Add", systemImage: "calendar.badge.plus")
-                            }
-                            .tint(.green)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button {
-                                event.status = .dismissed
-                                event.updatedAt = Date()
-                            } label: {
-                                Label("Dismiss", systemImage: "xmark")
-                            }
-                            .tint(.red)
-                        }
-                    }
-                }
-            }
-
-            let processingEvents = events.filter { $0.status == .processing }
-            if !processingEvents.isEmpty {
-                Section {
-                    ForEach(processingEvents) { event in
-                        EventRowView(event: event)
-                    }
-                } header: {
-                    HStack(spacing: 6) {
-                        Text("Processing")
-                        ProgressView()
-                            .controlSize(.mini)
-                        Text("(\(processingEvents.count))")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            let failedEvents = events.filter { $0.status == .failed }
-            if !failedEvents.isEmpty {
-                Section("Failed") {
-                    ForEach(failedEvents) { event in
-                        EventRowView(event: event)
-                            .swipeActions(edge: .leading) {
-                                if event.canRetry {
-                                    Button {
-                                        processor.retryEvent(event, context: modelContext)
-                                    } label: {
-                                        Label("Retry", systemImage: "arrow.clockwise")
-                                    }
-                                    .tint(.blue)
-                                }
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    modelContext.delete(event)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                    }
-                }
-            }
-
-            let historyEvents = events.filter { $0.status == .added || $0.status == .dismissed }
-            if !historyEvents.isEmpty {
-                Section("History") {
-                    ForEach(historyEvents) { event in
-                        NavigationLink(value: event.id) {
-                            EventRowView(event: event)
-                        }
-                    }
-                    .onDelete { offsets in
-                        for index in offsets {
-                            modelContext.delete(historyEvents[index])
-                        }
-                    }
-                }
-            }
-        }
-        .navigationDestination(for: UUID.self) { eventID in
-            EventDetailView(eventID: eventID, processor: processor)
-        }
     }
 }

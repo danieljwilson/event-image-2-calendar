@@ -5,30 +5,19 @@ struct EventRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            if let imageData = event.imageData, let uiImage = UIImage(data: imageData) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 50, height: 50)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            } else {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(.quaternary)
-                    .frame(width: 50, height: 50)
-                    .overlay {
-                        Image(systemName: statusIcon)
-                            .foregroundStyle(.secondary)
-                    }
-            }
+            // Left: status indicator
+            leftIndicator
 
+            // Center: event details
             VStack(alignment: .leading, spacing: 4) {
                 Text(event.title.isEmpty ? "Processing..." : event.title)
                     .font(.headline)
                     .lineLimit(1)
 
                 if event.status == .processing {
-                    ProgressView()
-                        .controlSize(.small)
+                    Text("Extracting event details...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 } else if event.status == .failed {
                     Text(event.errorMessage ?? "Extraction failed")
                         .font(.caption)
@@ -57,40 +46,52 @@ struct EventRowView: View {
 
             Spacer()
 
-            statusBadge
-        }
-    }
-
-    private var statusIcon: String {
-        switch event.status {
-        case .processing: return "hourglass"
-        case .failed: return "exclamationmark.triangle"
-        case .ready: return "checkmark.circle"
-        case .added: return "calendar.badge.checkmark"
-        case .dismissed: return "xmark.circle"
+            // Right: action indicator
+            rightIndicator
         }
     }
 
     @ViewBuilder
-    private var statusBadge: some View {
+    private var leftIndicator: some View {
         switch event.status {
         case .added:
             Image(systemName: "calendar.badge.checkmark")
+                .font(.title2)
                 .foregroundStyle(.green)
-        case .dismissed:
-            Image(systemName: "xmark.circle.fill")
-                .foregroundStyle(.secondary)
+                .frame(width: 28)
+        case .processing:
+            RoundedRectangle(cornerRadius: 2)
+                .fill(.yellow)
+                .frame(width: 4, height: 44)
         case .ready:
-            Circle()
-                .fill(.blue)
-                .frame(width: 8, height: 8)
+            RoundedRectangle(cornerRadius: 2)
+                .fill(.green)
+                .frame(width: 4, height: 44)
+        case .failed:
+            RoundedRectangle(cornerRadius: 2)
+                .fill(.red)
+                .frame(width: 4, height: 44)
+        case .dismissed:
+            RoundedRectangle(cornerRadius: 2)
+                .fill(.secondary)
+                .frame(width: 4, height: 44)
+        }
+    }
+
+    @ViewBuilder
+    private var rightIndicator: some View {
+        switch event.status {
+        case .processing:
+            ProgressView()
+                .controlSize(.small)
+        case .ready:
+            EmptyView()  // NavigationLink provides the chevron
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
                 .font(.caption)
-        case .processing:
-            ProgressView()
-                .controlSize(.mini)
+        case .added, .dismissed:
+            EmptyView()
         }
     }
 }

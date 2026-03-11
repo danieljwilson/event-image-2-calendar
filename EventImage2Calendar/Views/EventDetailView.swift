@@ -163,8 +163,7 @@ struct EventDetailView: View {
 
                 if event.status == .ready {
                     Button(role: .destructive) {
-                        event.status = .dismissed
-                        event.updatedAt = Date()
+                        modelContext.delete(event)
                         dismiss()
                     } label: {
                         Label("Dismiss Event", systemImage: "xmark.circle")

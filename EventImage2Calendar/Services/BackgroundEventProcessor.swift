@@ -174,8 +174,8 @@ class BackgroundEventProcessor {
                         throw ClaudeAPIError.invalidResponse
                     }
 
-                    // Try to enrich sparse results via web search
-                    let enriched = await Self.enrichIfNeeded(details, location: location)
+                    // Try to enrich sparse results via web search + source URL
+                    let enriched = await Self.enrichIfNeeded(details, location: location, sourceURL: sourceURL)
 
                     await MainActor.run {
                         let descriptor = FetchDescriptor<PersistedEvent>(
@@ -268,10 +268,23 @@ class BackgroundEventProcessor {
 
     // MARK: - Post-extraction enrichment via web search
 
+    /// Placeholder strings that shouldn't be used in search queries.
+    private static let placeholderValues: Set<String> = [
+        "unknown", "tbd", "tba", "n/a", "none", "not specified",
+        "venue to be confirmed", "to be announced", "to be determined"
+    ]
+
+    /// Returns the string if it looks like a real value, empty string if it's a placeholder.
+    private static func cleanPlaceholder(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return placeholderValues.contains(trimmed.lowercased()) ? "" : trimmed
+    }
+
     /// Check if extracted details are sparse and try to enrich via web search.
     private static func enrichIfNeeded(
         _ details: EventDetails,
-        location: CLLocationCoordinate2D?
+        location: CLLocationCoordinate2D?,
+        sourceURL: String? = nil
     ) async -> EventDetails {
         let dateMissing = !details.hasExplicitDate
         let dateIsHallucinated = abs(details.startDate.timeIntervalSince(Date())) < 600
@@ -280,35 +293,67 @@ class BackgroundEventProcessor {
         // The cost is one extra API call + search, but accuracy is much better.
         SharedContainerService.writeDebugLog("Enrichment: running (dateMissing=\(dateMissing), dateHallucinated=\(dateIsHallucinated))")
 
+        // Clean placeholder values from address before searching
+        let cleanAddress = cleanPlaceholder(details.address)
+
         // Search for the event's own page
         // Don't include venue in search — it's what we're trying to verify/find.
         // Title + city is enough to find the event's page.
-        guard let searchResult = await WebSearchService.searchForEventPage(
-            title: details.title, venue: "", address: details.address
-        ) else {
-            SharedContainerService.writeDebugLog("Enrichment: no search results found")
-            return details
-        }
-
-        SharedContainerService.writeDebugLog("Enrichment: found \(searchResult.urls.count) URLs, snippets=\(searchResult.snippets.count) chars")
-
-        // Try to fetch page content from each result URL until one works
         var fullText: String = ""
-        for resultURL in searchResult.urls {
-            SharedContainerService.writeDebugLog("Enrichment: trying \(resultURL.prefix(80))")
-            if let page = await fetchPageContent(from: resultURL),
-               let bodyText = page.bodyText, !bodyText.isEmpty {
-                fullText = combineContext(
-                    pageTitle: page.pageTitle, bodyText: bodyText, ogText: page.ogText
+
+        // 1. Try fetching the source URL directly (already have page content from extraction,
+        //    but enrichment may benefit from a fresh fetch or the OG text we didn't fully use)
+        if let sourceURL, !sourceURL.isEmpty {
+            SharedContainerService.writeDebugLog("Enrichment: trying source URL directly: \(sourceURL.prefix(80))")
+            if let page = await fetchPageContent(from: sourceURL) {
+                let combined = combineContext(
+                    pageTitle: page.pageTitle, bodyText: page.bodyText, ogText: page.ogText
                 )
-                break
+                if combined.count > 100 {
+                    fullText = combined
+                    SharedContainerService.writeDebugLog("Enrichment: got \(combined.count) chars from source URL")
+                }
             }
         }
 
-        // Fall back to search snippets if page fetch failed or returned nothing
-        if fullText.isEmpty && !searchResult.snippets.isEmpty {
-            SharedContainerService.writeDebugLog("Enrichment: using search snippets as fallback")
-            fullText = "Search results for this event:\n\(searchResult.snippets)"
+        // 2. Search for the event's own page (supplements or replaces source URL content)
+        let searchResult = await WebSearchService.searchForEventPage(
+            title: details.title, venue: "", address: cleanAddress
+        )
+
+        if let searchResult {
+            SharedContainerService.writeDebugLog("Enrichment: found \(searchResult.urls.count) URLs, snippets=\(searchResult.snippets.count) chars")
+
+            // Try to fetch page content from each result URL until one works
+            for resultURL in searchResult.urls {
+                // Skip if it's the same as source URL we already fetched
+                if let sourceURL, resultURL.hasPrefix(sourceURL.prefix(50)) { continue }
+                SharedContainerService.writeDebugLog("Enrichment: trying \(resultURL.prefix(80))")
+                if let page = await fetchPageContent(from: resultURL),
+                   let bodyText = page.bodyText, !bodyText.isEmpty {
+                    let pageContent = combineContext(
+                        pageTitle: page.pageTitle, bodyText: bodyText, ogText: page.ogText
+                    )
+                    if fullText.isEmpty {
+                        fullText = pageContent
+                    } else {
+                        fullText += "\n\n--- Additional source ---\n\(pageContent)"
+                    }
+                    break
+                }
+            }
+
+            // Append search snippets as additional context
+            if !searchResult.snippets.isEmpty {
+                if fullText.isEmpty {
+                    SharedContainerService.writeDebugLog("Enrichment: using search snippets as fallback")
+                    fullText = "Search results for this event:\n\(searchResult.snippets)"
+                } else {
+                    fullText += "\n\n--- Search snippets ---\n\(searchResult.snippets)"
+                }
+            }
+        } else {
+            SharedContainerService.writeDebugLog("Enrichment: no search results found")
         }
 
         guard !fullText.isEmpty else {
@@ -322,6 +367,13 @@ class BackgroundEventProcessor {
                 current: details, pageText: fullText, location: location,
                 dateIsPlaceholder: dateMissing || dateIsHallucinated
             )
+            // Clean any placeholder values that Claude returned as literal strings
+            if placeholderValues.contains(enriched.venue.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)) {
+                enriched.venue = ""
+            }
+            if placeholderValues.contains(enriched.address.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)) {
+                enriched.address = ""
+            }
             SharedContainerService.writeDebugLog("Enrichment: success — venue=\(enriched.venue), addr=\(enriched.address.prefix(50))")
             return enriched
         } catch {
@@ -416,8 +468,14 @@ class BackgroundEventProcessor {
             SharedContainerService.writeDebugLog("Page fetch HTTP \(statusCode) with UA=\(ua.prefix(30))..., \(data.count) bytes")
 
             if statusCode == 200, let text = String(data: data, encoding: .utf8), text.count > 500 {
-                html = text
-                break
+                // Check if page has real content, not just a redirect stub
+                let hasOGContent = text.contains("og:title") || text.contains("og:description") || text.contains("og:image")
+                let hasSubstantialBody = text.count > 5000
+                if hasOGContent || hasSubstantialBody {
+                    html = text
+                    break
+                }
+                SharedContainerService.writeDebugLog("Page fetch: skipping redirect stub (\(text.count) chars, no OG)")
             }
         }
 
