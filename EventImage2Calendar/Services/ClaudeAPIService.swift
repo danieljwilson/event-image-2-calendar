@@ -272,6 +272,10 @@ enum ClaudeAPIService {
         - If the current dates appear to be wrong (e.g., today's date, which suggests a placeholder), \
         replace them with the correct dates from the page content. Otherwise, keep existing dates.
         - Preserve the timezone.
+        - TOURING/MULTI-CITY EVENTS: If the page lists the same event at multiple locations or dates, \
+        pick the one geographically closest to the user's location.
+        - NEVER return a start_datetime in the past. Today is \(Self.todayString()). \
+        If all dates for the user's nearest location are past, pick the nearest future date at any location.
 
         Respond with ONLY a JSON object, no markdown fences. Use this schema:
         {
@@ -286,6 +290,17 @@ enum ClaudeAPIService {
           "event_dates": []
         }
         """
+
+        let locationContext: String
+        if let loc = location {
+            locationContext = """
+            The user is located near latitude \(loc.latitude), longitude \(loc.longitude). \
+            If the event takes place in multiple cities/dates (e.g., a touring show), \
+            use the date and venue closest to the user's location.
+            """
+        } else {
+            locationContext = ""
+        }
 
         let dateLine: String
         if !current.hasExplicitDate || dateIsPlaceholder {
@@ -315,7 +330,11 @@ enum ClaudeAPIService {
         let userText = """
         Enrich this event using the web page content below. Fill in any vague or missing fields.
 
+        \(locationContext)
+
         \(currentJSON)
+
+        Today's date is \(Self.todayString()) for reference.
 
         --- Web page content ---
         \(truncatedPage)
