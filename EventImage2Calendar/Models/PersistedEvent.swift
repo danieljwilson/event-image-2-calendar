@@ -47,6 +47,7 @@ final class PersistedEvent {
     var sourceURL: String?
     var sourceText: String?
     var hasExplicitDate: Bool = true
+    var hasExplicitTime: Bool = true
 
     static let maxRetryCount = 5
     static let stuckProcessingTimeout: TimeInterval = 300
@@ -163,6 +164,21 @@ final class PersistedEvent {
         self.sourceURL = nil
         self.sourceText = nil
         self.hasExplicitDate = true
+        self.hasExplicitTime = true
+    }
+
+    var needsDateCorrection: Bool {
+        !hasExplicitDate || !hasExplicitTime
+    }
+
+    var missingFieldDescription: String {
+        if !hasExplicitDate && !hasExplicitTime {
+            return "Please enter the date and time."
+        } else if !hasExplicitDate {
+            return "Please enter the date."
+        } else {
+            return "Please enter the time."
+        }
     }
 
     func applyExtraction(_ details: EventDetails) {
@@ -176,14 +192,15 @@ final class PersistedEvent {
         self.isAllDay = details.isAllDay
         self.eventDates = details.eventDates
         self.hasExplicitDate = details.hasExplicitDate
+        self.hasExplicitTime = details.hasExplicitTime
         self.updatedAt = Date()
         self.googleCalendarURL = CalendarService.googleCalendarURL(for: details)?.absoluteString
 
-        if details.hasExplicitDate {
+        if details.hasExplicitDate && details.hasExplicitTime {
             self.status = .ready
         } else {
             self.status = .failed
-            self.errorMessage = "Could not determine the event date/time. Please enter the date and time, then tap 'Confirm' to continue."
+            self.errorMessage = missingFieldDescription
         }
     }
 

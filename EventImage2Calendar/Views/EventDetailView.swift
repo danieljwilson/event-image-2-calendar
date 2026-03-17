@@ -110,11 +110,11 @@ struct EventDetailView: View {
                 .frame(minHeight: 80)
             }
 
-            // Missing date — prompt user to fill in
-            if event.status == .failed && !event.hasExplicitDate {
+            if event.status == .failed && event.needsDateCorrection {
                 Section {
                     Button {
                         event.hasExplicitDate = true
+                        event.hasExplicitTime = true
                         event.status = .ready
                         event.errorMessage = nil
                         event.updatedAt = Date()
@@ -122,7 +122,7 @@ struct EventDetailView: View {
                             for: event.toEventDetails()
                         )?.absoluteString
                     } label: {
-                        Label("Confirm Date & Time", systemImage: "checkmark.circle")
+                        Label("Confirm \(event.hasExplicitDate ? "Time" : (event.hasExplicitTime ? "Date" : "Date & Time"))", systemImage: "checkmark.circle")
                             .frame(maxWidth: .infinity)
                             .font(.headline)
                     }
@@ -279,7 +279,7 @@ struct EventDetailView: View {
                                 }
                             } label: {
                                 HStack {
-                                    Text(date, style: .date)
+                                    Text(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
                                         .foregroundStyle(.primary)
                                     Spacer()
                                     if selectedDateIndices.contains(index) {
@@ -296,13 +296,13 @@ struct EventDetailView: View {
                     HStack {
                         Text("Start")
                         Spacer()
-                        Text(event.startDate, style: .date)
+                        Text(event.startDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
                             .foregroundStyle(.secondary)
                     }
                     HStack {
                         Text("End")
                         Spacer()
-                        Text(event.endDate, style: .date)
+                        Text(event.endDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
                             .foregroundStyle(.secondary)
                     }
                 }

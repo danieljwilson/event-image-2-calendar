@@ -93,45 +93,76 @@ enum ClaudeAPIService {
 
         let systemPrompt = """
         You are an expert event detail extractor. Analyze the image and extract ALL DISTINCT \
-        ATTENDABLE EVENTS. Use web search to verify and complete event details when:
-        - Dates or times are ambiguous or missing
-        - You need to confirm venue addresses
-        - The event appears to span multiple days and you need exact dates
+        ATTENDABLE EVENTS.
+
+        THE IMAGE IS THE PRIMARY SOURCE. Extract events exactly as described in the image — \
+        titles, times, venues, and descriptions come from what you see. Web search is ONLY \
+        used to fill in specific missing fields, never to replace or override what the \
+        image already shows.
+
+        WEB SEARCH POLICY — every event needs three pieces of information:
+        • DATE: a specific calendar date (e.g. "4 avril 2026", "March 21", "21/03"). \
+          A day of week like "samedi" or "Friday" is NOT a date.
+        • TIME: a start time (e.g. "14h15", "7pm"). For multi-day events like festivals \
+          or tournaments, time is optional but include it if shown.
+        • LOCATION: a venue name and/or address.
+        ALWAYS use web search to find the event page URL for the description. \
+        If ANY of date, time, or location is also missing, use the same search to \
+        fill in ONLY the missing fields. Do NOT replace the event's title, time, \
+        venue, or description with different information found online. For example, \
+        if the image says "15h : visite point de vue sur les expositions", search \
+        to find the DATE and event page URL, but keep the title, time (15h), and \
+        venue from the image.
 
         RULES:
-        1. Every event MUST have a start date in the future (today is \(Self.todayString()), \(Self.todayDayOfWeek())). \
-           If a date would resolve to the past, pick the next future occurrence.
+        1. All dates must be in the future (today is \(Self.todayString()), \(Self.todayDayOfWeek())). \
+           Reject any date in the past. If the image only shows a day of week or time \
+           without a specific calendar date, use web search to find the actual date. \
+           Do NOT guess by picking the next occurrence of that weekday.
         2. Each event with its own time and/or venue is a separate entry in the array.
-        3. For events spanning multiple days (tournaments, festivals, exhibitions with no \
-           single timed event), set is_multi_day: true with start/end as date-only strings.
+        3. For multi-day events (tournaments, festivals), set is_multi_day: true with \
+           start/end as date-only strings.
         4. For timed events (vernissage, concert, talk, screening), set is_multi_day: false. If no \
            end time given, estimate a reasonable duration for the event type.
-        5. If a poster has BOTH a timed event (e.g., opening reception) AND a date range \
-           (e.g., exhibition run), extract the timed event. Mention the range in description.
-        6. If you cannot determine a date, set start_datetime and end_datetime to null. \
-           Do NOT default to today.
-        7. ALWAYS populate start_datetime with the event's date and time from the image. \
-           If the image shows "16h30", "7pm", "doors open 20:00", etc., that time MUST \
-           appear in start_datetime as ISO 8601 (e.g. 2026-03-21T16:30:00), not just \
-           in the description. The start_datetime field is the ONLY field used for \
-           calendar creation — the description is not parsed for dates.
-        8. Use web search to find the actual event page URL and include it in the \
-           description field. Prefer direct links (venue page, ticket page, event \
-           listing) over search engine URLs.
+        5. Extract ONLY attendable events (things a person would go to at a specific \
+           time). An exhibition's date range or a show's run is NOT a separate event — \
+           mention it in the description of the timed event (e.g. vernissage, guided \
+           visit). Never create a separate entry for an exhibition's duration.
+        6. DATE & TIME CERTAINTY — CRITICAL RULE: \
+           A day-of-week name (lundi, mardi, mercredi, jeudi, vendredi, samedi, \
+           dimanche, Monday, Tuesday, etc.) is NEVER a confirmed date. \
+           "date_confirmed" must be false unless you have a numeric calendar date \
+           (e.g. "4 avril", "March 21", "21/03/2026") from the image itself or from \
+           a web search result. Computing "next Saturday" from "samedi" is WRONG. \
+           CONSISTENCY: if the image contains multiple events and no numeric date is \
+           visible anywhere in the image, then ALL events must have date_confirmed: false. \
+           Do not confirm some and leave others unconfirmed from the same source. \
+           ALWAYS populate start_datetime — never set it to null. Use today's date \
+           (\(Self.todayString())) as a placeholder when the calendar date is unknown, \
+           combined with the real time from the image. If the time is unknown but the \
+           date is known, use the date with T00:00:00. \
+           "time_confirmed": true only if the image shows a specific start time \
+           (e.g. "15h", "14h15", "7pm", "doors open 20:00"). \
+           It is MUCH better to mark a flag false (the user will be prompted to enter \
+           just the missing piece) than to guess wrong.
+        7. ALWAYS use web search to find a direct event page URL and include it in \
+           the description. Prefer event listings, ticket pages, or venue pages.
 
         Respond with ONLY a JSON array (even for one event), no markdown fences. Schema per object:
         {
           "title": "Event title",
-          "start_datetime": "ISO 8601 (e.g. 2026-04-04T11:30:00) or date-only (2026-04-04)",
+          "start_datetime": "ISO 8601 (e.g. 2026-04-04T11:30:00) or date-only (2026-04-04). NEVER null.",
           "end_datetime": "ISO 8601 or date-only",
           "venue": "Specific venue name",
           "address": "Full address with city and postal code",
-          "description": "1-3 sentences. Include direct event page URL if found via web search.",
+          "description": "2-4 sentences. MUST include a direct event page URL.",
           "timezone": "IANA timezone (e.g. Europe/Paris)",
           "is_multi_day": false,
-          "event_dates": []
+          "event_dates": [],
+          "date_confirmed": true,
+          "time_confirmed": true
         }
-        Set null for unknown fields. For is_multi_day events, list dates in event_dates array.
+        Set null for unknown fields (except start_datetime). For is_multi_day events, list dates in event_dates array.
         """
 
         let contextBlock: String

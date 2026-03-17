@@ -89,7 +89,7 @@ EventImage2Calendar/                      # Main app target
 ├── Views/
 │   ├── ContentView.swift                 # Root (hosts EventListView)
 │   ├── CameraView.swift                  # Camera sheet + ImagePicker
-│   ├── EventListView.swift               # Event queue with swipe actions
+│   ├── EventListView.swift               # Event queue with swipe actions + DateCorrectionSheet + grouped processed list
 │   ├── EventRowView.swift                # Compact list row
 │   └── EventDetailView.swift             # Editable form + calendar buttons
 └── Utilities/
@@ -231,11 +231,15 @@ When a URL is shared (from Instagram, Safari, etc.), `BackgroundEventProcessor.e
 1. **Source text available** (from share extension) → send to `extractEventFromText` with `web_search` tool
 2. **No source text** → send bare URL to `extractEventFromURL` with `web_search` tool (Claude fetches page content via web search)
 
-**Response schema:** `{ title, start_datetime, end_datetime, venue, address, description, timezone, is_multi_day, event_dates }`
+**Response schema:** `{ title, start_datetime, end_datetime, venue, address, description, timezone, is_multi_day, event_dates, date_confirmed, time_confirmed }`
 
-### Missing Date Handling
+### Missing Date/Time Handling
 
-When Claude cannot determine the event date/time, `start_datetime` is returned as `null`. The `EventDetailsDTO.toEventDetails()` method falls back to `Date()` but sets `hasExplicitDate = false`. `PersistedEvent.applyExtraction()` then sets the event to `.failed` status with a message prompting the user to enter the missing date. The user can edit the date in EventDetailView and tap "Confirm Date & Time" to transition the event to `.ready` status.
+Claude returns `date_confirmed` and `time_confirmed` booleans alongside `start_datetime` (which is always populated — using today's date as placeholder when the date is unknown, or `T00:00:00` when the time is unknown). `EventDetailsDTO.toEventDetails()` maps these to `hasExplicitDate` and `hasExplicitTime` on `EventDetails`. `PersistedEvent.applyExtraction()` sets the event to `.failed` with a field-specific message ("Please enter the date", "Please enter the time", or both) when either flag is false.
+
+The user sees a focused `DateCorrectionSheet` (presented from `EventListView`) that shows only the missing picker component(s) — date-only, time-only, or both. The sheet merges the user's correction with the already-extracted values (e.g., keeping the extracted time when only the date was missing) and transitions the event to `.ready`. Changing the start date automatically syncs the end date, preserving the originally extracted duration. A fallback confirmation button is also available in `EventDetailView` for events reached via navigation.
+
+The prompt enforces consistency: if no numeric calendar date is visible anywhere in an image, all events extracted from that image must have `date_confirmed: false`. Day-of-week names (samedi, vendredi, etc.) are explicitly listed as not constituting confirmed dates.
 
 ### Swappable Components
 

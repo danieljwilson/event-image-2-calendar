@@ -10,6 +10,8 @@ struct EventListView: View {
     @State private var showLibrary = false
     @State private var showDebugLog = false
     @State private var selectedTab: Tab = .pending
+    @State private var correctionEvent: PersistedEvent?
+    @State private var expandedMonths: Set<String> = []
 
     enum Tab: String, CaseIterable {
         case pending = "Pending"
@@ -18,10 +20,49 @@ struct EventListView: View {
 
     private var pendingEvents: [PersistedEvent] {
         events.filter { $0.status == .processing || $0.status == .ready || $0.status == .failed }
+            .sorted { a, b in
+                if a.status == .processing && b.status != .processing { return true }
+                if a.status != .processing && b.status == .processing { return false }
+                return a.startDate < b.startDate
+            }
     }
 
     private var processedEvents: [PersistedEvent] {
         events.filter { $0.status == .added }
+            .sorted { $0.startDate < $1.startDate }
+    }
+
+    private var upcomingProcessed: [PersistedEvent] {
+        Array(processedEvents.prefix(3))
+    }
+
+    private var remainingByMonth: [(key: String, label: String, events: [PersistedEvent])] {
+        let remaining = Array(processedEvents.dropFirst(3))
+        guard !remaining.isEmpty else { return [] }
+
+        let calendar = Calendar.current
+        let monthFormatter = DateFormatter()
+        monthFormatter.dateFormat = "MMMM yyyy"
+        let keyFormatter = DateFormatter()
+        keyFormatter.dateFormat = "yyyy-MM"
+
+        var grouped: [String: (label: String, events: [PersistedEvent])] = [:]
+        var order: [String] = []
+
+        for event in remaining {
+            let key = keyFormatter.string(from: event.startDate)
+            if grouped[key] == nil {
+                let label = monthFormatter.string(from: event.startDate)
+                grouped[key] = (label: label, events: [])
+                order.append(key)
+            }
+            grouped[key]!.events.append(event)
+        }
+
+        return order.compactMap { key in
+            guard let group = grouped[key] else { return nil }
+            return (key: key, label: group.label, events: group.events)
+        }
     }
 
     var body: some View {
@@ -106,6 +147,9 @@ struct EventListView: View {
                 }
                 .ignoresSafeArea()
             }
+            .sheet(item: $correctionEvent) { event in
+                DateCorrectionSheet(event: event)
+            }
             .navigationDestination(for: UUID.self) { eventID in
                 EventDetailView(eventID: eventID, processor: processor)
             }
@@ -122,8 +166,7 @@ struct EventListView: View {
             if newPhase == .active {
                 processor.recoverStuckEvents(context: modelContext)
                 DigestService.flushPendingEvents(context: modelContext)
-                showCamera = true
-                consumePendingShares()  // Overrides to false if shares arrived
+                consumePendingShares()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.eventsnap.pendingSharesAvailable"))) { _ in
@@ -224,11 +267,13 @@ struct EventListView: View {
                                     Label("Dismiss", systemImage: "xmark")
                                 }
                             }
-                        } else if event.status == .failed && !event.hasExplicitDate {
-                            // Missing date — tappable so user can enter date
-                            NavigationLink(value: event.id) {
+                        } else if event.status == .failed && event.needsDateCorrection {
+                            Button {
+                                correctionEvent = event
+                            } label: {
                                 EventRowView(event: event)
                             }
+                            .buttonStyle(.plain)
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
                                     modelContext.delete(event)
@@ -277,17 +322,48 @@ struct EventListView: View {
                 }
             } else {
                 List {
-                    ForEach(processedEvents) { event in
-                        NavigationLink(value: event.id) {
-                            EventRowView(event: event)
+                    if !upcomingProcessed.isEmpty {
+                        Section("Coming Up") {
+                            ForEach(upcomingProcessed) { event in
+                                NavigationLink(value: event.id) {
+                                    EventRowView(event: event)
+                                }
+                            }
+                            .onDelete { offsets in
+                                for index in offsets {
+                                    modelContext.delete(upcomingProcessed[index])
+                                }
+                            }
                         }
                     }
-                    .onDelete { offsets in
-                        for index in offsets {
-                            modelContext.delete(processedEvents[index])
+
+                    ForEach(remainingByMonth, id: \.key) { group in
+                        Section(isExpanded: Binding(
+                            get: { expandedMonths.contains(group.key) },
+                            set: { isExpanded in
+                                if isExpanded {
+                                    expandedMonths.insert(group.key)
+                                } else {
+                                    expandedMonths.remove(group.key)
+                                }
+                            }
+                        )) {
+                            ForEach(group.events) { event in
+                                NavigationLink(value: event.id) {
+                                    EventRowView(event: event)
+                                }
+                            }
+                            .onDelete { offsets in
+                                for index in offsets {
+                                    modelContext.delete(group.events[index])
+                                }
+                            }
+                        } header: {
+                            Text("\(group.label) (\(group.events.count))")
                         }
                     }
                 }
+                .listStyle(.sidebar)
             }
         }
     }
@@ -323,5 +399,175 @@ struct EventListView: View {
             nil,
             .deliverImmediately
         )
+    }
+}
+
+// MARK: - Date/Time Correction Sheet
+
+private struct DateCorrectionSheet: View {
+    let event: PersistedEvent
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+
+    @State private var startDate: Date = Date()
+    @State private var endDate: Date = Date()
+
+    private var needsDate: Bool { !event.hasExplicitDate }
+    private var needsTime: Bool { !event.hasExplicitTime }
+
+    private var pickerComponents: DatePickerComponents {
+        if needsDate && needsTime { return [.date, .hourAndMinute] }
+        if needsDate { return .date }
+        return .hourAndMinute
+    }
+
+    private var headerText: String {
+        if needsDate && needsTime {
+            return "Enter the date and time"
+        } else if needsDate {
+            return "Enter the date"
+        } else {
+            return "Enter the time"
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(event.title)
+                        .font(.headline)
+                    if !event.venue.isEmpty {
+                        Text(event.venue)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section(headerText) {
+                    DatePicker("Start", selection: $startDate, displayedComponents: pickerComponents)
+                    DatePicker("End", selection: $endDate, displayedComponents: pickerComponents)
+                }
+
+                Section {
+                    Button {
+                        applyCorrection()
+                        dismiss()
+                    } label: {
+                        Label("Confirm", systemImage: "checkmark.circle")
+                            .frame(maxWidth: .infinity)
+                            .font(.headline)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+
+                    Button(role: .destructive) {
+                        modelContext.delete(event)
+                        dismiss()
+                    } label: {
+                        Label("Dismiss Event", systemImage: "xmark.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                }
+            }
+            .navigationTitle("Complete Event Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .onAppear {
+            startDate = event.startDate
+            endDate = event.endDate
+        }
+        .onChange(of: startDate) { _, newStart in
+            let offset = event.endDate.timeIntervalSince(event.startDate)
+            endDate = newStart.addingTimeInterval(offset)
+        }
+    }
+
+    private func applyCorrection() {
+        if needsDate && !needsTime {
+            let calendar = Calendar.current
+            let dateComponents = calendar.dateComponents([.year, .month, .day], from: startDate)
+            let timeComponents = calendar.dateComponents([.hour, .minute, .second], from: event.startDate)
+            var merged = DateComponents()
+            merged.year = dateComponents.year
+            merged.month = dateComponents.month
+            merged.day = dateComponents.day
+            merged.hour = timeComponents.hour
+            merged.minute = timeComponents.minute
+            merged.second = timeComponents.second
+            if let corrected = calendar.date(from: merged) {
+                event.startDate = corrected
+            } else {
+                event.startDate = startDate
+            }
+
+            let endDateComps = calendar.dateComponents([.year, .month, .day], from: endDate)
+            let endTimeComps = calendar.dateComponents([.hour, .minute, .second], from: event.endDate)
+            var endMerged = DateComponents()
+            endMerged.year = endDateComps.year
+            endMerged.month = endDateComps.month
+            endMerged.day = endDateComps.day
+            endMerged.hour = endTimeComps.hour
+            endMerged.minute = endTimeComps.minute
+            endMerged.second = endTimeComps.second
+            if let corrected = calendar.date(from: endMerged) {
+                event.endDate = corrected
+            } else {
+                event.endDate = endDate
+            }
+        } else if needsTime && !needsDate {
+            let calendar = Calendar.current
+            let dateComponents = calendar.dateComponents([.year, .month, .day], from: event.startDate)
+            let timeComponents = calendar.dateComponents([.hour, .minute, .second], from: startDate)
+            var merged = DateComponents()
+            merged.year = dateComponents.year
+            merged.month = dateComponents.month
+            merged.day = dateComponents.day
+            merged.hour = timeComponents.hour
+            merged.minute = timeComponents.minute
+            merged.second = timeComponents.second
+            if let corrected = calendar.date(from: merged) {
+                event.startDate = corrected
+            } else {
+                event.startDate = startDate
+            }
+
+            let endDateComps = calendar.dateComponents([.year, .month, .day], from: event.endDate)
+            let endTimeComps = calendar.dateComponents([.hour, .minute, .second], from: endDate)
+            var endMerged = DateComponents()
+            endMerged.year = endDateComps.year
+            endMerged.month = endDateComps.month
+            endMerged.day = endDateComps.day
+            endMerged.hour = endTimeComps.hour
+            endMerged.minute = endTimeComps.minute
+            endMerged.second = endTimeComps.second
+            if let corrected = calendar.date(from: endMerged) {
+                event.endDate = corrected
+            } else {
+                event.endDate = endDate
+            }
+        } else {
+            event.startDate = startDate
+            event.endDate = endDate
+        }
+
+        event.hasExplicitDate = true
+        event.hasExplicitTime = true
+        event.status = .ready
+        event.errorMessage = nil
+        event.updatedAt = Date()
+        event.googleCalendarURL = CalendarService.googleCalendarURL(
+            for: event.toEventDetails()
+        )?.absoluteString
     }
 }

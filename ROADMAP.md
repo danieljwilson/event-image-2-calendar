@@ -33,6 +33,11 @@ Status of Event Snap features and the path to a production-ready App Store relea
 - [x] User location context (timezone + country) for localized web search results
 - [x] Missing date handling: events without determinable dates flagged as failed with user-editable date pickers
 - [x] Strengthened prompts requiring `start_datetime` populated from visible times (not just description)
+- [x] Separate date/time certainty: `date_confirmed` and `time_confirmed` flags preserve extracted partial info (e.g., time known but date uncertain)
+- [x] Focused DateCorrectionSheet that shows only the missing picker (date, time, or both) instead of full EventDetailView
+- [x] Consistency enforcement: all events from the same image share date certainty; day-of-week names explicitly excluded as confirmed dates
+- [x] DateCorrectionSheet auto-syncs end date when start date changes, preserving extracted duration
+- [x] Processed events grouped: next 3 "Coming Up" prominently, remainder collapsed by month
 
 ### Digest Pipeline
 - [x] Cloudflare Worker with authenticated event ingestion

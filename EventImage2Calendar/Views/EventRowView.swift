@@ -18,6 +18,17 @@ struct EventRowView: View {
                     Text("Extracting event details...")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                } else if event.status == .failed && event.needsDateCorrection {
+                    Text(event.missingFieldDescription)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                    if !event.venue.isEmpty {
+                        Text(event.venue)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 } else if event.status == .failed {
                     Text(event.errorMessage ?? "Extraction failed")
                         .font(.caption)
@@ -31,7 +42,7 @@ struct EventRowView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    Text(event.startDate, style: .date)
+                    Text(event.startDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
@@ -69,7 +80,7 @@ struct EventRowView: View {
                 .frame(width: 4, height: 44)
         case .failed:
             RoundedRectangle(cornerRadius: 2)
-                .fill(.red)
+                .fill(event.needsDateCorrection ? .orange : .red)
                 .frame(width: 4, height: 44)
         case .dismissed:
             RoundedRectangle(cornerRadius: 2)
@@ -87,9 +98,15 @@ struct EventRowView: View {
         case .ready:
             EmptyView()  // NavigationLink provides the chevron
         case .failed:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.red)
-                .font(.caption)
+            if event.needsDateCorrection {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+            } else {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
         case .added, .dismissed:
             EmptyView()
         }

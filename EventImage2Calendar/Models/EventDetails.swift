@@ -11,8 +11,8 @@ class EventDetails {
     var timezone: String?
     var isAllDay: Bool
     var eventDates: [String]
-    /// False when no date/time was found during extraction (startDate is a placeholder).
     var hasExplicitDate: Bool
+    var hasExplicitTime: Bool
 
     init(
         title: String = "",
@@ -24,7 +24,8 @@ class EventDetails {
         timezone: String? = nil,
         isAllDay: Bool = false,
         eventDates: [String] = [],
-        hasExplicitDate: Bool = true
+        hasExplicitDate: Bool = true,
+        hasExplicitTime: Bool = true
     ) {
         self.title = title
         self.startDate = startDate
@@ -36,6 +37,7 @@ class EventDetails {
         self.isAllDay = isAllDay
         self.eventDates = eventDates
         self.hasExplicitDate = hasExplicitDate
+        self.hasExplicitTime = hasExplicitTime
     }
 }
 
@@ -51,6 +53,8 @@ struct EventDetailsDTO: Decodable {
     let timezone: String?
     let isMultiDay: Bool?
     let eventDates: [String]?
+    let dateConfirmed: Bool?
+    let timeConfirmed: Bool?
 
     enum CodingKeys: String, CodingKey {
         case title
@@ -62,6 +66,8 @@ struct EventDetailsDTO: Decodable {
         case timezone
         case isMultiDay = "is_multi_day"
         case eventDates = "event_dates"
+        case dateConfirmed = "date_confirmed"
+        case timeConfirmed = "time_confirmed"
     }
 
     func toEventDetails() -> EventDetails {
@@ -77,6 +83,9 @@ struct EventDetailsDTO: Decodable {
             end = parseDate(endDatetime, eventTimeZone: eventTimeZone) ?? start.addingTimeInterval(7200)
         }
 
+        let hasDate = dateConfirmed ?? (parsedStart != nil)
+        let hasTime = timeConfirmed ?? true
+
         return EventDetails(
             title: title ?? "Untitled Event",
             startDate: start,
@@ -87,7 +96,8 @@ struct EventDetailsDTO: Decodable {
             timezone: timezone,
             isAllDay: isMulti,
             eventDates: eventDates ?? [],
-            hasExplicitDate: parsedStart != nil
+            hasExplicitDate: hasDate,
+            hasExplicitTime: hasTime
         )
     }
 

@@ -68,6 +68,7 @@ cloudflare-worker/
 - No separate enrichment step — extraction + web search happen in a single Claude call
 - Multi-event extraction: a single image can produce multiple `PersistedEvent` rows
 - Multi-day events use `isAllDay` flag + `eventDates` array for multi-date selection UI
+- Partial extraction certainty: `hasExplicitDate` / `hasExplicitTime` flags on `PersistedEvent` track which fields need user correction; `DateCorrectionSheet` in `EventListView` provides a focused picker for the missing piece
 
 ## Important Rules
 - **Do NOT build Xcode projects** — make code changes only, the user will build and test themselves.
