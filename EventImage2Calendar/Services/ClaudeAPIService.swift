@@ -65,6 +65,16 @@ enum ClaudeAPIService {
         location: CLLocationCoordinate2D?,
         additionalContext: String? = nil
     ) async throws -> EventDetails {
+        let events = try await extractEvents(imageData: imageData, location: location, additionalContext: additionalContext)
+        guard let first = events.first else { throw ClaudeAPIError.noEventFound }
+        return first
+    }
+
+    static func extractEvents(
+        imageData: Data,
+        location: CLLocationCoordinate2D?,
+        additionalContext: String? = nil
+    ) async throws -> [EventDetails] {
         let apiKey = APIKeyStorage.getAPIKey()
         guard !apiKey.isEmpty else { throw ClaudeAPIError.noAPIKey }
 
@@ -82,56 +92,38 @@ enum ClaudeAPIService {
         }
 
         let systemPrompt = """
-        You are an expert event detail extractor specializing in cultural and social events. \
-        Analyze the event poster image and extract the PRIMARY ATTENDABLE EVENT — the specific \
-        occasion a person would go to at a particular date and time.
+        You are an expert event detail extractor. Analyze the image and extract ALL DISTINCT \
+        ATTENDABLE EVENTS. Use web search to verify and complete event details when:
+        - Dates or times are ambiguous or missing
+        - You need to confirm venue addresses
+        - The event appears to span multiple days and you need exact dates
 
-        CRITICAL RULES FOR EVENT IDENTIFICATION:
-        1. PRIORITIZE events with SPECIFIC TIMES (e.g., "19h", "7pm", "doors open 20:00") over date ranges.
-        2. A "vernissage" (opening night/reception) IS the primary event, NOT the exhibition run dates.
-        3. A "launch party", "opening night", "premiere", or "kickoff" is the event, not the season/run.
-        4. If a poster shows BOTH an event with a specific time AND a date range, extract the TIMED event. \
-           Mention the date range in the description field only.
-        5. Date ranges (e.g., "21/03 - 02/04") are exhibition/festival durations — include them in \
-           the description but do NOT use them as start/end dates unless no specific timed event exists.
-        6. If ONLY a date range exists with no specific timed event, set is_multi_day to true. \
-           Set start_datetime to the first date and end_datetime to the last date (date-only format "YYYY-MM-DD"). \
-           List each individual date in event_dates.
+        RULES:
+        1. Every event MUST have a start date in the future (today is \(Self.todayString()), \(Self.todayDayOfWeek())). \
+           If a date would resolve to the past, pick the next future occurrence.
+        2. Each event with its own time and/or venue is a separate entry in the array.
+        3. For events spanning multiple days (tournaments, festivals, exhibitions with no \
+           single timed event), set is_multi_day: true with start/end as date-only strings.
+        4. For timed events (vernissage, concert, talk, screening), set is_multi_day: false. If no \
+           end time given, estimate a reasonable duration for the event type.
+        5. If a poster has BOTH a timed event (e.g., opening reception) AND a date range \
+           (e.g., exhibition run), extract the timed event. Mention the range in description.
+        6. If you cannot determine a date, set start_datetime and end_datetime to null. \
+           Do NOT default to today.
 
-        CULTURAL TERMS TO RECOGNIZE:
-        - "Vernissage" / "Finissage" = opening/closing reception event (typically 2-3 hours)
-        - "Inauguration" = opening ceremony
-        - "Soirée" = evening event
-        - "Apéro" / "Apéritif" = drinks reception (typically 1.5-2 hours)
-        - "Conférence" / "Table ronde" = talk/panel (typically 1.5-2 hours)
-
-        END TIME RULES (for timed events only, not multi-day):
-        - If no end time is specified, default to start time + 2 hours.
-        - If the event type implies a known duration (concert = 3h, reception/vernissage = 2h, talk = 1.5h), use that.
-        - NEVER set the end date to a different day unless the poster explicitly states an overnight event.
-
-        Respond with ONLY a JSON object, no markdown fences, no other text. Use this exact schema:
+        Respond with ONLY a JSON array (even for one event), no markdown fences. Schema per object:
         {
-          "title": "Event title (include event type if applicable, e.g., 'Vernissage: OTOM Solo Show')",
-          "start_datetime": "ISO 8601 datetime (e.g., 2026-03-20T19:00:00) or date-only for multi-day (e.g., 2026-05-02)",
-          "end_datetime": "ISO 8601 datetime (e.g., 2026-03-20T21:00:00) or date-only for multi-day (e.g., 2026-05-03)",
-          "venue": "Venue name",
-          "address": "Full address including city, postal code, state/country",
-          "description": "Brief description (1-3 sentences). Include exhibition/festival run dates here if different from the event date. If a website URL, ticket link, or social media link is visible on the poster, include it at the end.",
-          "timezone": "IANA timezone (e.g., Europe/Paris)",
+          "title": "Event title",
+          "start_datetime": "ISO 8601 (e.g. 2026-04-04T11:30:00) or date-only (2026-04-04)",
+          "end_datetime": "ISO 8601 or date-only",
+          "venue": "Specific venue name",
+          "address": "Full address with city and postal code",
+          "description": "1-3 sentences. Include source URLs if visible.",
+          "timezone": "IANA timezone (e.g. Europe/Paris)",
           "is_multi_day": false,
-          "event_dates": ["2026-05-02", "2026-05-03"]
+          "event_dates": []
         }
-        MULTI-DAY RULES:
-        - Set is_multi_day to true ONLY when the event spans multiple days with no single specific timed event.
-        - When is_multi_day is true, list ALL individual dates in event_dates array (e.g., a 2-day festival on May 2-3 → ["2026-05-02", "2026-05-03"]).
-        - When is_multi_day is false, event_dates should be an empty array [].
-        - For timed events (vernissage, concert, etc.), always set is_multi_day to false even if there is also a date range on the poster.
-
-        If a field cannot be determined, set it to null. \
-        For start_datetime and end_datetime: ONLY extract dates/times that are explicitly shown or clearly implied. \
-        If no date or time is visible, set both to null — do NOT default to today's date or the current time. \
-        For dates without a year, assume the nearest future occurrence.
+        Set null for unknown fields. For is_multi_day events, list dates in event_dates array.
         """
 
         let contextBlock: String
@@ -146,20 +138,23 @@ enum ClaudeAPIService {
         }
 
         let userText = """
-        Extract the PRIMARY ATTENDABLE EVENT from this poster image. \
-        If there are multiple dates (e.g., an opening reception AND an exhibition run), \
-        extract the specific timed event that someone would attend, not the date range.
+        Extract ALL DISTINCT ATTENDABLE EVENTS from this image.
 
         \(locationContext)
         \(contextBlock)
-
-        Today's date is \(Self.todayString()) for reference.
         """
 
         let requestBody: [String: Any] = [
             "model": "claude-haiku-4-5",
-            "max_tokens": 1024,
+            "max_tokens": 4096,
             "system": systemPrompt,
+            "tools": [
+                [
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": 5
+                ]
+            ],
             "messages": [
                 [
                     "role": "user",
@@ -181,7 +176,7 @@ enum ClaudeAPIService {
             ]
         ]
 
-        return try await sendRequest(requestBody)
+        return try await sendRequestMultiple(requestBody)
     }
 
     // MARK: - URL-based extraction (for shared URLs)
@@ -196,154 +191,51 @@ enum ClaudeAPIService {
         let locationContext: String
         if let loc = location {
             locationContext = """
-            The user is currently located at latitude \(loc.latitude), longitude \(loc.longitude). \
-            Use this to help identify the city/region if not evident from the URL.
+            The user is located at latitude \(loc.latitude), longitude \(loc.longitude). \
+            Use this to identify the city/region and pick the nearest location for touring events.
             """
         } else {
             locationContext = "No location data available."
         }
 
         let systemPrompt = """
-        You are an expert event detail extractor. The user has shared a URL that likely points to \
-        an event page. Based on the URL structure, domain, and any identifiers in the path, extract \
-        event details using your knowledge of common event platforms (Eventbrite, Meetup, Facebook Events, \
-        Instagram, gallery websites, etc.).
+        You are an expert event detail extractor. The user has shared a URL. \
+        Use web search to find the event page and extract complete details.
 
-        Respond with ONLY a JSON object, no markdown fences, no other text. Use this exact schema:
+        Today is \(Self.todayString()), \(Self.todayDayOfWeek()). All dates must be in the future.
+
+        Respond with ONLY a JSON object, no markdown fences. Schema:
         {
-          "title": "Event title (your best inference from the URL)",
-          "start_datetime": "ISO 8601 datetime if inferable, otherwise null",
-          "end_datetime": "ISO 8601 datetime if inferable, otherwise null",
-          "venue": "Venue name if inferable",
-          "address": "Full address if inferable",
-          "description": "Brief description. Always include the source URL.",
-          "timezone": "IANA timezone if inferable"
-        }
-        If a field cannot be determined, set to null. For dates without a year, assume the nearest future occurrence.
-        """
-
-        let userText = """
-        Extract event details from this shared URL: \(urlString)
-
-        \(locationContext)
-
-        Today's date is \(Self.todayString()) for reference.
-        """
-
-        let requestBody: [String: Any] = [
-            "model": "claude-haiku-4-5",
-            "max_tokens": 1024,
-            "system": systemPrompt,
-            "messages": [
-                [
-                    "role": "user",
-                    "content": userText
-                ]
-            ]
-        ]
-
-        return try await sendRequest(requestBody)
-    }
-
-    // MARK: - Enrichment (fill in sparse details using web search results)
-
-    static func enrichEventDetails(
-        current: EventDetails,
-        pageText: String,
-        location: CLLocationCoordinate2D?,
-        dateIsPlaceholder: Bool = false
-    ) async throws -> EventDetails {
-        let apiKey = APIKeyStorage.getAPIKey()
-        guard !apiKey.isEmpty else { throw ClaudeAPIError.noAPIKey }
-
-        let systemPrompt = """
-        You are enriching an event's details using additional information found on a web page. \
-        The user already has a partially-extracted event. Your job is to verify and improve ALL fields \
-        using the web page content provided.
-
-        Rules:
-        - VENUE must be an actual place name (e.g., "Théâtre de la Photographie et de l'Image", "Palais des Festivals", \
-        "Salle Nikaïa"). If the current venue is a description of the event type (e.g., "La voile de compétition sur écran géant"), \
-        a generic category (e.g., "Cinema or Film Venue"), or a placeholder ("TBD", "Venue to be confirmed", "Unknown"), \
-        replace it with the specific venue name from the page.
-        - ADDRESS must be a street address or at minimum a city. If empty or just a country, fill it in.
-        - DESCRIPTION: If short, add relevant details (but keep it concise, 2-4 sentences). Include ticket info or URLs if found.
-        - Do NOT change the title unless the page clearly shows a better/more complete name.
-        - If the current dates appear to be wrong (e.g., today's date, which suggests a placeholder), \
-        replace them with the correct dates from the page content. Otherwise, keep existing dates.
-        - Preserve the timezone.
-        - TOURING/MULTI-CITY EVENTS: If the page lists the same event at multiple locations or dates, \
-        pick the one geographically closest to the user's location.
-        - NEVER return a start_datetime in the past. Today is \(Self.todayString()). \
-        If all dates for the user's nearest location are past, pick the nearest future date at any location.
-
-        Respond with ONLY a JSON object, no markdown fences. Use this schema:
-        {
-          "title": "...",
-          "start_datetime": "ISO 8601",
-          "end_datetime": "ISO 8601",
-          "venue": "...",
-          "address": "...",
-          "description": "...",
-          "timezone": "...",
+          "title": "Event title",
+          "start_datetime": "ISO 8601 or date-only",
+          "end_datetime": "ISO 8601 or date-only",
+          "venue": "Specific venue name",
+          "address": "Full address with city and postal code",
+          "description": "1-3 sentences. Include the source URL.",
+          "timezone": "IANA timezone",
           "is_multi_day": false,
           "event_dates": []
         }
+        Set null for unknown fields. For is_multi_day events, list dates in event_dates array.
         """
-
-        let locationContext: String
-        if let loc = location {
-            locationContext = """
-            The user is located near latitude \(loc.latitude), longitude \(loc.longitude). \
-            If the event takes place in multiple cities/dates (e.g., a touring show), \
-            use the date and venue closest to the user's location.
-            """
-        } else {
-            locationContext = ""
-        }
-
-        let dateLine: String
-        if !current.hasExplicitDate || dateIsPlaceholder {
-            dateLine = """
-            - Start: UNKNOWN (placeholder — must be replaced with the correct date from the page)
-            - End: UNKNOWN (placeholder — must be replaced with the correct date from the page)
-            """
-        } else {
-            dateLine = """
-            - Start: \(Self.formatDate(current.startDate))
-            - End: \(Self.formatDate(current.endDate))
-            """
-        }
-
-        let currentJSON = """
-        Current event details:
-        - Title: \(current.title)
-        \(dateLine)\
-        - Venue: \(current.venue)
-        - Address: \(current.address)
-        - Description: \(current.eventDescription)
-        - Timezone: \(current.timezone ?? "unknown")
-        """
-
-        let truncatedPage = String(pageText.prefix(4000))
 
         let userText = """
-        Enrich this event using the web page content below. Fill in any vague or missing fields.
+        Extract event details from this URL: \(urlString)
 
         \(locationContext)
-
-        \(currentJSON)
-
-        Today's date is \(Self.todayString()) for reference.
-
-        --- Web page content ---
-        \(truncatedPage)
         """
 
         let requestBody: [String: Any] = [
             "model": "claude-haiku-4-5",
             "max_tokens": 2048,
             "system": systemPrompt,
+            "tools": [
+                [
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": 5
+                ]
+            ],
             "messages": [
                 [
                     "role": "user",
@@ -353,12 +245,6 @@ enum ClaudeAPIService {
         ]
 
         return try await sendRequest(requestBody)
-    }
-
-    private static func formatDate(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate, .withTime, .withDashSeparatorInDate, .withColonSeparatorInTime]
-        return formatter.string(from: date)
     }
 
     // MARK: - Text-based extraction (for page content scraped from URLs)
@@ -374,77 +260,42 @@ enum ClaudeAPIService {
         let locationContext: String
         if let loc = location {
             locationContext = """
-            The user is currently located at latitude \(loc.latitude), longitude \(loc.longitude). \
-            Use this to help identify the city/region if not evident from the content.
+            The user is located at latitude \(loc.latitude), longitude \(loc.longitude). \
+            Use this to identify the city/region and pick the nearest location for touring events.
             """
         } else {
             locationContext = "No location data available."
         }
 
         let systemPrompt = """
-        You are an expert event detail extractor specializing in cultural and social events. \
-        Analyze the provided web page text and extract the PRIMARY ATTENDABLE EVENT — the specific \
-        occasion a person would go to at a particular date and time.
+        You are an expert event detail extractor. Analyze the text and extract the primary \
+        attendable event. Use web search to verify and complete details when needed.
 
-        CRITICAL RULES FOR EVENT IDENTIFICATION:
-        1. PRIORITIZE events with SPECIFIC TIMES (e.g., "19h", "7pm", "doors open 20:00") over date ranges.
-        2. A "vernissage" (opening night/reception) IS the primary event, NOT the exhibition run dates.
-        3. A "launch party", "opening night", "premiere", or "kickoff" is the event, not the season/run.
-        4. If the text mentions BOTH an event with a specific time AND a date range, extract the TIMED event. \
-           Mention the date range in the description field only.
-        5. Date ranges (e.g., "21/03 - 02/04") are exhibition/festival durations — include them in \
-           the description but do NOT use them as start/end dates unless no specific timed event exists.
-        6. If ONLY a date range exists with no specific timed event, set is_multi_day to true. \
-           Set start_datetime to the first date and end_datetime to the last date (date-only format "YYYY-MM-DD"). \
-           List each individual date in event_dates.
+        Today is \(Self.todayString()), \(Self.todayDayOfWeek()). All dates must be in the future.
 
-        CULTURAL TERMS TO RECOGNIZE:
-        - "Vernissage" / "Finissage" = opening/closing reception event (typically 2-3 hours)
-        - "Inauguration" = opening ceremony
-        - "Soirée" = evening event
-        - "Apéro" / "Apéritif" = drinks reception (typically 1.5-2 hours)
-        - "Conférence" / "Table ronde" = talk/panel (typically 1.5-2 hours)
-
-        END TIME RULES (for timed events only, not multi-day):
-        - If no end time is specified, default to start time + 2 hours.
-        - If the event type implies a known duration (concert = 3h, reception/vernissage = 2h, talk = 1.5h), use that.
-        - NEVER set the end date to a different day unless explicitly stated as an overnight event.
-
-        Respond with ONLY a JSON object, no markdown fences, no other text. Use this exact schema:
+        Respond with ONLY a JSON object, no markdown fences. Schema:
         {
-          "title": "Event title (include event type if applicable, e.g., 'Vernissage: OTOM Solo Show')",
-          "start_datetime": "ISO 8601 datetime (e.g., 2026-03-20T19:00:00) or date-only for multi-day (e.g., 2026-05-02)",
-          "end_datetime": "ISO 8601 datetime (e.g., 2026-03-20T21:00:00) or date-only for multi-day (e.g., 2026-05-03)",
-          "venue": "Venue name",
-          "address": "Full address including city, postal code, state/country",
-          "description": "Brief description (1-3 sentences). Include the source URL if provided.",
-          "timezone": "IANA timezone (e.g., Europe/Paris)",
+          "title": "Event title",
+          "start_datetime": "ISO 8601 or date-only",
+          "end_datetime": "ISO 8601 or date-only",
+          "venue": "Specific venue name",
+          "address": "Full address with city and postal code",
+          "description": "1-3 sentences. Include source URL if available.",
+          "timezone": "IANA timezone",
           "is_multi_day": false,
-          "event_dates": ["2026-05-02", "2026-05-03"]
+          "event_dates": []
         }
-        MULTI-DAY RULES:
-        - Set is_multi_day to true ONLY when the event spans multiple days with no single specific timed event.
-        - When is_multi_day is true, list ALL individual dates in event_dates array.
-        - When is_multi_day is false, event_dates should be an empty array [].
-
-        If a field cannot be determined, set it to null. \
-        For start_datetime and end_datetime: ONLY extract dates/times that are explicitly shown or clearly implied. \
-        If no date or time is visible, set both to null — do NOT default to today's date or the current time. \
-        For dates without a year, assume the nearest future occurrence.
+        Set null for unknown fields. For is_multi_day events, list dates in event_dates array.
         """
 
         let truncatedText = String(text.prefix(4000))
         let urlNote = sourceURL.map { "\nSource URL: \($0)" } ?? ""
 
         let userText = """
-        Extract the PRIMARY ATTENDABLE EVENT from this web page content. \
-        If there are multiple dates (e.g., an opening reception AND an exhibition run), \
-        extract the specific timed event that someone would attend, not the date range.
+        Extract the primary attendable event from this page content.
 
         \(locationContext)
         \(urlNote)
-
-        Today's date is \(Self.todayString()) for reference.
 
         --- Page content ---
         \(truncatedText)
@@ -452,8 +303,15 @@ enum ClaudeAPIService {
 
         let requestBody: [String: Any] = [
             "model": "claude-haiku-4-5",
-            "max_tokens": 1024,
+            "max_tokens": 2048,
             "system": systemPrompt,
+            "tools": [
+                [
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": 3
+                ]
+            ],
             "messages": [
                 [
                     "role": "user",
@@ -467,7 +325,58 @@ enum ClaudeAPIService {
 
     // MARK: - Shared request logic
 
-    private static func sendRequest(_ requestBody: [String: Any]) async throws -> EventDetails {
+    private static func sendRequestMultiple(_ requestBody: [String: Any]) async throws -> [EventDetails] {
+        let rawText = try await sendRequestRaw(requestBody)
+
+        // Detect if response is an array or single object
+        let stripped = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "```json", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Try array parsing first
+        if stripped.contains("[") {
+            let arrayJSON = extractJSONArray(from: rawText)
+            if let data = arrayJSON.data(using: .utf8) {
+                do {
+                    let dtos = try JSONDecoder().decode([EventDetailsDTO].self, from: data)
+                    let events = dtos.map { $0.toEventDetails() }
+                        .filter { $0.title != "Untitled Event" || $0.hasExplicitDate }
+                    if !events.isEmpty { return events }
+                } catch {
+                    SharedContainerService.writeDebugLog("Array decode failed, trying single: \(error.localizedDescription)")
+                }
+            }
+        }
+
+        // Fall back to single object
+        let objectJSON = extractJSON(from: rawText)
+        guard let data = objectJSON.data(using: .utf8) else {
+            throw ClaudeAPIError.decodingFailed("Could not convert response to data")
+        }
+
+        do {
+            let dto = try JSONDecoder().decode(EventDetailsDTO.self, from: data)
+            if dto.title == nil && dto.venue == nil && dto.startDatetime == nil {
+                throw ClaudeAPIError.noEventFound
+            }
+            return [dto.toEventDetails()]
+        } catch let error as ClaudeAPIError {
+            throw error
+        } catch {
+            let recovered = repairTruncatedJSON(objectJSON)
+            if recovered != objectJSON, let recoveredData = recovered.data(using: .utf8),
+               let dto = try? JSONDecoder().decode(EventDetailsDTO.self, from: recoveredData) {
+                SharedContainerService.writeDebugLog("JSON recovered from truncation (multi)")
+                return [dto.toEventDetails()]
+            }
+            SharedContainerService.writeDebugLog("JSON decode failed (multi). Raw: \(objectJSON.prefix(500))")
+            throw ClaudeAPIError.decodingFailed(error.localizedDescription)
+        }
+    }
+
+    /// Sends the HTTP request and returns the raw text from Claude's response.
+    private static func sendRequestRaw(_ requestBody: [String: Any]) async throws -> String {
         let apiKey = APIKeyStorage.getAPIKey()
 
         var request = URLRequest(url: endpoint)
@@ -476,7 +385,7 @@ enum ClaudeAPIService {
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
-        request.timeoutInterval = 25
+        request.timeoutInterval = 60
 
         let data: Data
         let response: URLResponse
@@ -496,12 +405,18 @@ enum ClaudeAPIService {
         }
 
         let claudeResponse = try JSONDecoder().decode(ClaudeResponse.self, from: data)
-        guard let textContent = claudeResponse.content.first(where: { $0.type == "text" }),
+        // Use LAST text block — with web_search, the final text block contains the JSON answer
+        guard let textContent = claudeResponse.content.last(where: { $0.type == "text" }),
               let jsonString = textContent.text else {
             throw ClaudeAPIError.invalidResponse
         }
 
-        let cleanJSON = extractJSON(from: jsonString)
+        return jsonString
+    }
+
+    private static func sendRequest(_ requestBody: [String: Any]) async throws -> EventDetails {
+        let rawText = try await sendRequestRaw(requestBody)
+        let cleanJSON = extractJSON(from: rawText)
         guard let jsonData = cleanJSON.data(using: .utf8) else {
             throw ClaudeAPIError.decodingFailed("Could not convert response to data")
         }
@@ -525,6 +440,33 @@ enum ClaudeAPIService {
             SharedContainerService.writeDebugLog("JSON decode failed. Raw: \(cleanJSON.prefix(500))")
             throw ClaudeAPIError.decodingFailed(error.localizedDescription)
         }
+    }
+
+    /// Strip markdown fences, trailing commas, and extract a JSON array
+    private static func extractJSONArray(from text: String) -> String {
+        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Strip markdown code fences
+        cleaned = cleaned.replacingOccurrences(of: "```json", with: "")
+        cleaned = cleaned.replacingOccurrences(of: "```", with: "")
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Extract the JSON array
+        guard let start = cleaned.firstIndex(of: "["),
+              let end = cleaned.lastIndex(of: "]") else {
+            return cleaned
+        }
+        var json = String(cleaned[start...end])
+
+        // Remove trailing commas before } or ]
+        if let regex = try? NSRegularExpression(pattern: #",\s*([}\]])"#) {
+            json = regex.stringByReplacingMatches(
+                in: json, range: NSRange(json.startIndex..., in: json),
+                withTemplate: "$1"
+            )
+        }
+
+        return json
     }
 
     /// Strip markdown fences, trailing commas, and extract raw JSON
@@ -603,6 +545,14 @@ enum ClaudeAPIService {
     private static func todayString() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter.string(from: Date())
+    }
+
+    private static func todayDayOfWeek() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         return formatter.string(from: Date())
     }
 }

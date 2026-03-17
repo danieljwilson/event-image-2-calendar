@@ -8,6 +8,17 @@ enum CalendarService {
         UIApplication.shared.open(url)
     }
 
+    /// Opens Google Calendar for multiple events with staggered delays
+    static func openGoogleCalendar(events: [EventDetails]) {
+        for (index, event) in events.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.5) {
+                if let url = googleCalendarURL(for: event) {
+                    UIApplication.shared.open(url)
+                }
+            }
+        }
+    }
+
     /// Constructs Google Calendar URL with event details
     static func googleCalendarURL(for event: EventDetails) -> URL? {
         var components = URLComponents(string: "https://calendar.google.com/calendar/render")!
@@ -77,49 +88,64 @@ enum CalendarService {
         return String(result.prefix(500))
     }
 
-    /// Generates .ics file content and returns a temporary file URL for sharing
+    /// Generates .ics file for a single event
     static func generateICSFile(for event: EventDetails) -> URL? {
-        let location = [event.venue, event.address]
-            .filter { !$0.isEmpty }
-            .joined(separator: ", ")
+        generateICSFile(for: [event])
+    }
 
-        // Escape special characters for iCalendar format
-        let escapedTitle = event.title.replacingOccurrences(of: ",", with: "\\,")
-        let escapedDescription = event.eventDescription.replacingOccurrences(of: ",", with: "\\,")
-            .replacingOccurrences(of: "\n", with: "\\n")
-        let escapedLocation = location.replacingOccurrences(of: ",", with: "\\,")
+    /// Generates .ics file with one or more VEVENTs and returns a temporary file URL for sharing
+    static func generateICSFile(for events: [EventDetails]) -> URL? {
+        guard !events.isEmpty else { return nil }
 
-        let dtStart: String
-        let dtEnd: String
+        var vevents: [String] = []
 
-        if event.isAllDay {
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "yyyyMMdd"
-            dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        for event in events {
+            let location = [event.venue, event.address]
+                .filter { !$0.isEmpty }
+                .joined(separator: ", ")
 
-            let exclusiveEnd = Calendar.current.date(byAdding: .day, value: 1, to: event.endDate) ?? event.endDate
-            dtStart = "DTSTART;VALUE=DATE:\(dateFormatter.string(from: event.startDate))"
-            dtEnd = "DTEND;VALUE=DATE:\(dateFormatter.string(from: exclusiveEnd))"
-        } else {
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
-            dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+            let escapedTitle = event.title.replacingOccurrences(of: ",", with: "\\,")
+            let escapedDescription = event.eventDescription.replacingOccurrences(of: ",", with: "\\,")
+                .replacingOccurrences(of: "\n", with: "\\n")
+            let escapedLocation = location.replacingOccurrences(of: ",", with: "\\,")
 
-            dtStart = "DTSTART:\(dateFormatter.string(from: event.startDate))"
-            dtEnd = "DTEND:\(dateFormatter.string(from: event.endDate))"
+            let dtStart: String
+            let dtEnd: String
+
+            if event.isAllDay {
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyyMMdd"
+                dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+
+                let exclusiveEnd = Calendar.current.date(byAdding: .day, value: 1, to: event.endDate) ?? event.endDate
+                dtStart = "DTSTART;VALUE=DATE:\(dateFormatter.string(from: event.startDate))"
+                dtEnd = "DTEND;VALUE=DATE:\(dateFormatter.string(from: exclusiveEnd))"
+            } else {
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
+                dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+
+                dtStart = "DTSTART:\(dateFormatter.string(from: event.startDate))"
+                dtEnd = "DTEND:\(dateFormatter.string(from: event.endDate))"
+            }
+
+            vevents.append("""
+            BEGIN:VEVENT
+            UID:\(UUID().uuidString)
+            \(dtStart)
+            \(dtEnd)
+            SUMMARY:\(escapedTitle)
+            LOCATION:\(escapedLocation)
+            DESCRIPTION:\(escapedDescription)
+            END:VEVENT
+            """)
         }
 
         let icsContent = """
         BEGIN:VCALENDAR
         VERSION:2.0
         PRODID:-//EventSnap//EN
-        BEGIN:VEVENT
-        \(dtStart)
-        \(dtEnd)
-        SUMMARY:\(escapedTitle)
-        LOCATION:\(escapedLocation)
-        DESCRIPTION:\(escapedDescription)
-        END:VEVENT
+        \(vevents.joined(separator: "\n"))
         END:VCALENDAR
         """
 

@@ -19,13 +19,13 @@ EventImage2Calendar/                      # Main app target
 │   ├── EventDetails.swift                # @Observable + Codable event model (in-memory) + DTO
 │   └── PersistedEvent.swift              # SwiftData @Model + EventStatus enum
 ├── Services/
-│   ├── ClaudeAPIService.swift            # Claude Messages API client (vision + URL extraction)
+│   ├── ClaudeAPIService.swift            # Claude Messages API client (vision + URL + text extraction with web_search tool)
 │   ├── LocationService.swift             # CLLocationManager wrapper
 │   ├── CalendarService.swift             # Google Calendar URL + .ics generation
 │   ├── BackgroundEventProcessor.swift    # Background API calls + SwiftData persistence
 │   ├── DigestService.swift               # POST events to Cloudflare Worker
 │   ├── WorkerAuthService.swift           # Device key registration + JWT retrieval
-│   └── WebSearchService.swift            # Web search capabilities
+│   └── WebSearchService.swift            # Google search URL helper for descriptions
 ├── Views/
 │   ├── ContentView.swift                 # Root (hosts EventListView)
 │   ├── CameraView.swift                  # Camera sheet (modal) + ImagePicker
@@ -64,8 +64,13 @@ cloudflare-worker/
 - Images resized to 1024px max dimension, JPEG quality 0.7 before API upload (see `Shared/ImageResizer.swift`)
 - Google Calendar integration via URL scheme (no OAuth)
 - Location accuracy: `kCLLocationAccuracyKilometer` (city-level, for context only)
-- Extraction prompt prioritizes primary attendable events (e.g., vernissage) over date ranges
-- Multi-day events use `isAllDay` flag + `eventDates` array for single-day picker UI
+- Claude API uses `web_search_20250305` tool for verifying/completing event details (dates, addresses, etc.)
+- No separate enrichment step — extraction + web search happen in a single Claude call
+- Multi-event extraction: a single image can produce multiple `PersistedEvent` rows
+- Multi-day events use `isAllDay` flag + `eventDates` array for multi-date selection UI
+
+## Important Rules
+- **Do NOT build Xcode projects** — make code changes only, the user will build and test themselves.
 
 ## Development
 ```bash

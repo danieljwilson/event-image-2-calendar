@@ -120,7 +120,8 @@ struct EventListView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 processor.recoverStuckEvents(context: modelContext)
-                consumePendingShares()
+                showCamera = true
+                consumePendingShares()  // Overrides to false if shares arrived
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.eventsnap.pendingSharesAvailable"))) { _ in

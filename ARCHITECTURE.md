@@ -78,7 +78,7 @@ EventImage2Calendar/                      # Main app target
 │   ├── LocationService.swift             # CLLocationManager wrapper
 │   ├── DigestService.swift               # POST events to Cloudflare Worker
 │   ├── WorkerAuthService.swift           # Device key registration + JWT retrieval
-│   └── WebSearchService.swift            # Web search capabilities
+│   └── WebSearchService.swift            # Google search URL helper for descriptions
 ├── Views/
 │   ├── ContentView.swift                 # Root (hosts EventListView)
 │   ├── CameraView.swift                  # Camera sheet + ImagePicker
@@ -147,7 +147,7 @@ Camera / Photo Library / Share Extension
 - On app launch: events stuck in `.processing` for >5 min are recovered to `.failed`; failed events with retryable errors are auto-retried
 - Image validation: JPEG compression checked for success and 5 MB size limit before API upload
 
-**Multi-day events:** When Claude detects a date range with no specific timed event, it returns `is_multi_day: true` with an `event_dates` array. The detail view offers two modes: pick a single date (all-day event for one day) or create a multi-day all-day event spanning the full range.
+**Multi-day events:** When Claude detects a date range with no specific timed event, it returns `is_multi_day: true` with an `event_dates` array. The detail view offers two modes: "Select Days" (multi-select checklist — pick any combination of dates, each becomes a separate all-day calendar event) or "Full Event" (entire date range as one event). Multi-date selection creates multiple Google Calendar entries (opened with staggered delays) or a single ICS file containing multiple VEVENTs.
 
 ## Share Extension
 
@@ -163,23 +163,26 @@ The Share Extension is a lightweight UIKit-based app extension (~120MB memory li
 
 ## Claude API Integration
 
+All extraction modes use Claude's **`web_search_20250305`** tool, allowing the model to verify and complete event details (dates, addresses, venues) via web search in a single API call — no separate enrichment step.
+
 Three extraction modes in `ClaudeAPIService`:
 
-- **Image extraction** (`extractEvent`): Sends base64 JPEG + structured prompt. Prompt prioritizes specific timed events (vernissage, concert) over date ranges. Recognizes cultural terms (vernissage, finissage, apéro, etc.). Optional `additionalContext` text appended to user prompt (e.g., OG metadata from source page).
-- **Text extraction** (`extractEventFromText`): Sends page text content scraped from a URL. Uses the same detailed system prompt as image extraction. Truncates input to 4000 chars.
-- **URL extraction** (`extractEventFromURL`): Last-resort fallback — sends bare URL string for inference from URL structure/platform knowledge. Rarely used since page text extraction usually succeeds.
+- **Image extraction** (`extractEvents` / `extractEvent`): Sends base64 JPEG + structured prompt with `web_search` tool (max 5 uses). Returns a JSON **array** of events — a single image may contain multiple distinct events at different venues/times. `extractEvent` is a convenience wrapper returning the first event only.
+- **Text extraction** (`extractEventFromText`): Sends page text content + `web_search` tool (max 3 uses). Truncates input to 4000 chars.
+- **URL extraction** (`extractEventFromURL`): Sends bare URL + `web_search` tool (max 5 uses) — Claude searches the web to find and extract event details from the URL.
 
-All use shared `sendRequest()` for HTTP handling and JSON parsing via `EventDetailsDTO`. Network errors from `URLSession` are wrapped into `ClaudeAPIError.apiError` for consistent error classification. Empty extractions (all key fields nil) throw `ClaudeAPIError.noEventFound`.
+**Web search response handling:** With web search enabled, Claude's response `content` array may contain `[text, server_tool_use, web_search_tool_result, text, ...]`. The parser extracts the **last** `text` block, which contains the final JSON answer after any searches.
+
+**Multi-event images:** When a poster/screenshot lists several events (e.g., a cultural weekend schedule with events at different venues), `extractEvents` returns one `EventDetails` per distinct event. `BackgroundEventProcessor` applies the first result to the original `PersistedEvent` and creates additional `PersistedEvent` rows for the rest.
+
+All use shared `sendRequestRaw()` for HTTP handling (60s timeout to accommodate web search). `sendRequest()` parses a single JSON object via `EventDetailsDTO`; `sendRequestMultiple()` tries JSON array first, falls back to single object. Network errors from `URLSession` are wrapped into `ClaudeAPIError.apiError` for consistent error classification. Empty extractions (all key fields nil) throw `ClaudeAPIError.noEventFound`.
 
 ### URL Share Extraction Pipeline
 
-When a URL is shared (from Instagram, Safari, etc.), `BackgroundEventProcessor.extractFromURL` runs a multi-step fallback chain:
+When a URL is shared (from Instagram, Safari, etc.), `BackgroundEventProcessor.extractFromURL` uses a simple two-path approach:
 
-1. **Fetch page content** (`fetchPageContent`): Tries desktop Safari UA first, then `facebookexternalhit/1.1` for Instagram. For Instagram URLs, also tries the `/embed/` endpoint. Extracts OG tags, `<title>`, and visible body text (HTML stripped).
-2. **OG image found** → download + downsample → send to Claude vision + OG text as context
-3. **No OG image but page text found** → send page text to `extractEventFromText`
-4. **No page content but share extension provided text** → send that to `extractEventFromText`
-5. **Last resort** → send bare URL to `extractEventFromURL`
+1. **Source text available** (from share extension) → send to `extractEventFromText` with `web_search` tool
+2. **No source text** → send bare URL to `extractEventFromURL` with `web_search` tool (Claude fetches page content via web search)
 
 **Response schema:** `{ title, start_datetime, end_datetime, venue, address, description, timezone, is_multi_day, event_dates }`
 

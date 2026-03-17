@@ -15,7 +15,7 @@ Status of Event Snap features and the path to a production-ready App Store relea
 - [x] Google Calendar via URL scheme (no OAuth)
 - [x] ICS file export via share sheet
 - [x] All-day event support (correct yyyyMMdd format, exclusive end dates)
-- [x] Multi-day event support with single-day picker and full-range options
+- [x] Multi-day event support with multi-date selection and full-range options
 - [x] URL auto-linking in event descriptions
 
 ### Share Extension
@@ -53,6 +53,7 @@ Priority: **High** — prerequisite for reliable daily use.
 - [x] Loading indicators during extraction
 - [x] Retry logic for transient failures (with backoff)
 - [x] Edge cases: very large images, unsupported formats, posters with no event info
+- [x] Multi-event image extraction (single image → multiple PersistedEvents)
 
 ## Phase 2: Security Hardening
 

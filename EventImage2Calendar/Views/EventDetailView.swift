@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 enum MultiDayMode: String, CaseIterable {
-    case singleDay = "Single Day"
+    case selectDays = "Select Days"
     case fullEvent = "Full Event"
 }
 
@@ -15,7 +15,8 @@ struct EventDetailView: View {
     @State private var showShareSheet = false
     @State private var icsFileURL: URL?
     @State private var multiDayMode: MultiDayMode = .fullEvent
-    @State private var selectedDateIndex: Int = 0
+    @State private var selectedDateIndices: Set<Int> = []
+    @State private var didInitSelection = false
 
     @Query private var matchingEvents: [PersistedEvent]
 
@@ -30,6 +31,13 @@ struct EventDetailView: View {
     private var isMultiDay: Bool {
         guard let event else { return false }
         return event.isAllDay && event.eventDates.count > 1
+    }
+
+    private var eventCount: Int {
+        if isMultiDay && multiDayMode == .selectDays {
+            return selectedDateIndices.count
+        }
+        return 1
     }
 
     var body: some View {
@@ -106,12 +114,13 @@ struct EventDetailView: View {
                 if event.status == .ready || event.status == .added {
                     Button {
                         let details = buildEventDetails(from: event)
-                        CalendarService.openGoogleCalendar(event: details)
+                        CalendarService.openGoogleCalendar(events: details)
                         event.status = .added
                         event.updatedAt = Date()
                     } label: {
                         Label(
-                            event.status == .added ? "Open in Google Calendar Again" : "Add to Google Calendar",
+                            eventCount > 1 ? "Add \(eventCount) Events to Google Calendar" :
+                                (event.status == .added ? "Open in Google Calendar Again" : "Add to Google Calendar"),
                             systemImage: "calendar.badge.plus"
                         )
                         .frame(maxWidth: .infinity)
@@ -120,6 +129,7 @@ struct EventDetailView: View {
                     .buttonStyle(.borderedProminent)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
+                    .disabled(isMultiDay && multiDayMode == .selectDays && selectedDateIndices.isEmpty)
                 }
 
                 Button {
@@ -129,12 +139,16 @@ struct EventDetailView: View {
                         showShareSheet = true
                     }
                 } label: {
-                    Label("Export .ics File", systemImage: "square.and.arrow.up")
+                    Label(
+                        eventCount > 1 ? "Export \(eventCount) Events as .ics" : "Export .ics File",
+                        systemImage: "square.and.arrow.up"
+                    )
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
+                .disabled(isMultiDay && multiDayMode == .selectDays && selectedDateIndices.isEmpty)
 
                 if event.status == .failed {
                     if event.canRetry {
@@ -198,13 +212,40 @@ struct EventDetailView: View {
                 }
                 .pickerStyle(.segmented)
 
-                if multiDayMode == .singleDay {
+                if multiDayMode == .selectDays {
                     let dates = parsedEventDates(event)
                     if !dates.isEmpty {
-                        Picker("Date", selection: $selectedDateIndex) {
-                            ForEach(Array(dates.enumerated()), id: \.offset) { index, date in
-                                Text(date, style: .date).tag(index)
+                        Button {
+                            if selectedDateIndices.count == dates.count {
+                                selectedDateIndices.removeAll()
+                            } else {
+                                selectedDateIndices = Set(0..<dates.count)
                             }
+                        } label: {
+                            Text(selectedDateIndices.count == dates.count ? "Deselect All" : "Select All")
+                                .font(.caption)
+                        }
+
+                        ForEach(Array(dates.enumerated()), id: \.offset) { index, date in
+                            Button {
+                                if selectedDateIndices.contains(index) {
+                                    selectedDateIndices.remove(index)
+                                } else {
+                                    selectedDateIndices.insert(index)
+                                }
+                            } label: {
+                                HStack {
+                                    Text(date, style: .date)
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    if selectedDateIndices.contains(index) {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(.blue)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 } else {
@@ -220,6 +261,13 @@ struct EventDetailView: View {
                         Text(event.endDate, style: .date)
                             .foregroundStyle(.secondary)
                     }
+                }
+            }
+            .onAppear {
+                if !didInitSelection {
+                    let count = event.eventDates.count
+                    selectedDateIndices = Set(0..<count)
+                    didInitSelection = true
                 }
             }
         } else {
@@ -263,24 +311,24 @@ struct EventDetailView: View {
         return event.eventDates.compactMap { formatter.date(from: $0) }
     }
 
-    private func buildEventDetails(from event: PersistedEvent) -> EventDetails {
-        if isMultiDay && multiDayMode == .singleDay {
+    private func buildEventDetails(from event: PersistedEvent) -> [EventDetails] {
+        if isMultiDay && multiDayMode == .selectDays {
             let dates = parsedEventDates(event)
-            let safeIndex = min(selectedDateIndex, dates.count - 1)
-            let selectedDate = dates.isEmpty ? event.startDate : dates[max(0, safeIndex)]
-
-            return EventDetails(
-                title: event.title,
-                startDate: selectedDate,
-                endDate: selectedDate,
-                venue: event.venue,
-                address: event.address,
-                eventDescription: event.eventDescription,
-                timezone: event.timezone,
-                isAllDay: true
-            )
+            return selectedDateIndices.sorted().compactMap { index -> EventDetails? in
+                guard index < dates.count else { return nil }
+                return EventDetails(
+                    title: event.title,
+                    startDate: dates[index],
+                    endDate: dates[index],
+                    venue: event.venue,
+                    address: event.address,
+                    eventDescription: event.eventDescription,
+                    timezone: event.timezone,
+                    isAllDay: true
+                )
+            }
         } else {
-            return event.toEventDetails()
+            return [event.toEventDetails()]
         }
     }
 }

@@ -147,61 +147,61 @@ class BackgroundEventProcessor {
 
             for attempt in 0..<maxAutoRetries {
                 do {
-                    let details: EventDetails
+                    var allDetails: [EventDetails]
+
                     if let imageData {
                         SharedContainerService.writeDebugLog("Extraction: image path (\(imageData.count) bytes)")
                         do {
-                            details = try await ClaudeAPIService.extractEvent(
+                            allDetails = try await ClaudeAPIService.extractEvents(
                                 imageData: imageData, location: location
                             )
                         } catch ClaudeAPIError.noEventFound where sourceURL != nil {
                             SharedContainerService.writeDebugLog("Extraction: image found nothing, trying page content from \(sourceURL!)")
-                            details = try await Self.extractFromURL(
+                            let details = try await Self.extractFromURL(
                                 sourceURL!, sourceText: sourceText, location: location
                             )
+                            allDetails = [details]
                         }
                     } else if let sourceURL {
                         SharedContainerService.writeDebugLog("Extraction: URL path for \(sourceURL)")
-                        details = try await Self.extractFromURL(
+                        let details = try await Self.extractFromURL(
                             sourceURL, sourceText: sourceText, location: location
                         )
+                        allDetails = [details]
                     } else if let sourceText, !sourceText.isEmpty {
                         SharedContainerService.writeDebugLog("Extraction: text-only path (\(sourceText.count) chars)")
-                        details = try await ClaudeAPIService.extractEventFromText(
+                        let details = try await ClaudeAPIService.extractEventFromText(
                             text: sourceText, sourceURL: nil, location: location
                         )
+                        allDetails = [details]
                     } else {
                         throw ClaudeAPIError.invalidResponse
                     }
 
-                    // Try to enrich sparse results via web search + source URL
-                    let enriched = await Self.enrichIfNeeded(details, location: location, sourceURL: sourceURL)
+                    SharedContainerService.writeDebugLog("Extraction: found \(allDetails.count) event(s)")
 
+                    let finalDetails = allDetails
                     await MainActor.run {
                         let descriptor = FetchDescriptor<PersistedEvent>(
                             predicate: #Predicate { $0.id == eventID }
                         )
-                        if let persisted = try? context.fetch(descriptor).first {
-                            persisted.applyExtraction(enriched)
-
-                            if !persisted.eventDescription.contains("http") {
-                                let link = WebSearchService.googleSearchURL(
-                                    title: persisted.title,
-                                    venue: persisted.venue,
-                                    address: persisted.address
-                                )
-                                persisted.eventDescription += "\n\n\(link)"
-                            }
-
-                            try? context.save()
-
-                            if sendToDigest {
-                                let digestData = DigestService.EventPayload(from: persisted)
-                                Task.detached {
-                                    await DigestService.sendToDigest(digestData)
-                                }
-                            }
+                        guard let persisted = try? context.fetch(descriptor).first else {
+                            UIApplication.shared.endBackgroundTask(bgTaskID)
+                            return
                         }
+
+                        // Apply first event to the original PersistedEvent
+                        Self.applyAndFinalize(finalDetails[0], to: persisted, sendToDigest: sendToDigest)
+
+                        // Create additional PersistedEvents for remaining events
+                        for i in 1..<finalDetails.count {
+                            let extra = PersistedEvent(status: .processing, imageData: imageData)
+                            extra.sourceURL = sourceURL
+                            context.insert(extra)
+                            Self.applyAndFinalize(finalDetails[i], to: extra, sendToDigest: sendToDigest)
+                        }
+
+                        try? context.save()
                         UIApplication.shared.endBackgroundTask(bgTaskID)
                     }
                     return
@@ -237,6 +237,27 @@ class BackgroundEventProcessor {
         }
     }
 
+    /// Apply extraction results to a PersistedEvent and send to digest if needed.
+    private static func applyAndFinalize(_ details: EventDetails, to persisted: PersistedEvent, sendToDigest: Bool) {
+        persisted.applyExtraction(details)
+
+        if !persisted.eventDescription.contains("http") {
+            let link = WebSearchService.googleSearchURL(
+                title: persisted.title,
+                venue: persisted.venue,
+                address: persisted.address
+            )
+            persisted.eventDescription += "\n\n\(link)"
+        }
+
+        if sendToDigest {
+            let digestData = DigestService.EventPayload(from: persisted)
+            Task.detached {
+                await DigestService.sendToDigest(digestData)
+            }
+        }
+    }
+
     // MARK: - Recovery
 
     @MainActor
@@ -266,359 +287,26 @@ class BackgroundEventProcessor {
         }
     }
 
-    // MARK: - Post-extraction enrichment via web search
+    // MARK: - URL extraction (Claude uses web search to fetch and extract)
 
-    /// Placeholder strings that shouldn't be used in search queries.
-    private static let placeholderValues: Set<String> = [
-        "unknown", "tbd", "tba", "n/a", "none", "not specified",
-        "venue to be confirmed", "to be announced", "to be determined"
-    ]
-
-    /// Returns the string if it looks like a real value, empty string if it's a placeholder.
-    private static func cleanPlaceholder(_ value: String) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return placeholderValues.contains(trimmed.lowercased()) ? "" : trimmed
-    }
-
-    /// Check if extracted details are sparse and try to enrich via web search.
-    private static func enrichIfNeeded(
-        _ details: EventDetails,
-        location: CLLocationCoordinate2D?,
-        sourceURL: String? = nil
-    ) async -> EventDetails {
-        let dateMissing = !details.hasExplicitDate
-        let dateIsHallucinated = abs(details.startDate.timeIntervalSince(Date())) < 600
-
-        // Always enrich — let Claude verify venue/address/dates against web data.
-        // The cost is one extra API call + search, but accuracy is much better.
-        SharedContainerService.writeDebugLog("Enrichment: running (dateMissing=\(dateMissing), dateHallucinated=\(dateIsHallucinated))")
-
-        // Clean placeholder values from address before searching
-        let cleanAddress = cleanPlaceholder(details.address)
-
-        // Search for the event's own page
-        // Don't include venue in search — it's what we're trying to verify/find.
-        // Title + city is enough to find the event's page.
-        var fullText: String = ""
-
-        // 1. Try fetching the source URL directly (already have page content from extraction,
-        //    but enrichment may benefit from a fresh fetch or the OG text we didn't fully use)
-        if let sourceURL, !sourceURL.isEmpty {
-            SharedContainerService.writeDebugLog("Enrichment: trying source URL directly: \(sourceURL.prefix(80))")
-            if let page = await fetchPageContent(from: sourceURL) {
-                let combined = combineContext(
-                    pageTitle: page.pageTitle, bodyText: page.bodyText, ogText: page.ogText
-                )
-                if combined.count > 100 {
-                    fullText = combined
-                    SharedContainerService.writeDebugLog("Enrichment: got \(combined.count) chars from source URL")
-                }
-            }
-        }
-
-        // 2. Search for the event's own page (supplements or replaces source URL content)
-        let searchResult = await WebSearchService.searchForEventPage(
-            title: details.title, venue: "", address: cleanAddress
-        )
-
-        if let searchResult {
-            SharedContainerService.writeDebugLog("Enrichment: found \(searchResult.urls.count) URLs, snippets=\(searchResult.snippets.count) chars")
-
-            // Try to fetch page content from each result URL until one works
-            for resultURL in searchResult.urls {
-                // Skip if it's the same as source URL we already fetched
-                if let sourceURL, resultURL.hasPrefix(sourceURL.prefix(50)) { continue }
-                SharedContainerService.writeDebugLog("Enrichment: trying \(resultURL.prefix(80))")
-                if let page = await fetchPageContent(from: resultURL),
-                   let bodyText = page.bodyText, !bodyText.isEmpty {
-                    let pageContent = combineContext(
-                        pageTitle: page.pageTitle, bodyText: bodyText, ogText: page.ogText
-                    )
-                    if fullText.isEmpty {
-                        fullText = pageContent
-                    } else {
-                        fullText += "\n\n--- Additional source ---\n\(pageContent)"
-                    }
-                    break
-                }
-            }
-
-            // Append search snippets as additional context
-            if !searchResult.snippets.isEmpty {
-                if fullText.isEmpty {
-                    SharedContainerService.writeDebugLog("Enrichment: using search snippets as fallback")
-                    fullText = "Search results for this event:\n\(searchResult.snippets)"
-                } else {
-                    fullText += "\n\n--- Search snippets ---\n\(searchResult.snippets)"
-                }
-            }
-        } else {
-            SharedContainerService.writeDebugLog("Enrichment: no search results found")
-        }
-
-        guard !fullText.isEmpty else {
-            SharedContainerService.writeDebugLog("Enrichment: no content available")
-            return details
-        }
-
-        // Ask Claude to enrich
-        do {
-            let enriched = try await ClaudeAPIService.enrichEventDetails(
-                current: details, pageText: fullText, location: location,
-                dateIsPlaceholder: dateMissing || dateIsHallucinated
-            )
-            // Clean any placeholder values that Claude returned as literal strings
-            if placeholderValues.contains(enriched.venue.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)) {
-                enriched.venue = ""
-            }
-            if placeholderValues.contains(enriched.address.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)) {
-                enriched.address = ""
-            }
-            SharedContainerService.writeDebugLog("Enrichment: success — venue=\(enriched.venue), addr=\(enriched.address.prefix(50))")
-            return enriched
-        } catch {
-            SharedContainerService.writeDebugLog("Enrichment: Claude error — \(error.localizedDescription)")
-            return details  // Return original on failure
-        }
-    }
-
-    // MARK: - URL extraction with fallback chain
-
-    /// Full fallback chain: OG image → page text → sourceText → bare URL
+    /// Send URL to Claude with web search — it handles page fetching internally.
     private static func extractFromURL(
         _ urlString: String,
         sourceText: String?,
         location: CLLocationCoordinate2D?
     ) async throws -> EventDetails {
-        let page = await fetchPageContent(from: urlString)
-
-        // 1. If OG image found → vision extraction + text context
-        if let page, let ogImageURL = page.ogImageURL,
-           let ogImageData = await downloadAndDownsample(from: ogImageURL) {
-            let context = combineContext(ogText: page.ogText, sourceText: sourceText)
-            SharedContainerService.writeDebugLog("Extraction: OG image (\(ogImageData.count) bytes), context=\(context.count) chars")
-            do {
-                return try await ClaudeAPIService.extractEvent(
-                    imageData: ogImageData, location: location,
-                    additionalContext: context.isEmpty ? nil : context
-                )
-            } catch ClaudeAPIError.noEventFound {
-                SharedContainerService.writeDebugLog("Extraction: OG image found nothing, trying text fallback")
-                // Fall through to step 2
-            }
-        }
-
-        // 2. If page text found (body text OR OG text) → text-based extraction
-        let fullText = combineContext(
-            pageTitle: page?.pageTitle, bodyText: page?.bodyText,
-            ogText: page?.ogText, sourceText: sourceText
-        )
-        if !fullText.isEmpty {
-            SharedContainerService.writeDebugLog("Extraction: page text (\(fullText.count) chars)")
-            return try await ClaudeAPIService.extractEventFromText(
-                text: fullText, sourceURL: urlString, location: location
-            )
-        }
-
-        // 3. If we have sourceText from the share extension (and nothing from page)
+        // If we have sourceText from the share extension, try text extraction first
         if let sourceText, !sourceText.isEmpty {
-            SharedContainerService.writeDebugLog("Extraction: sourceText fallback (\(sourceText.count) chars)")
+            SharedContainerService.writeDebugLog("Extraction: text path with source URL (\(sourceText.count) chars)")
             return try await ClaudeAPIService.extractEventFromText(
                 text: sourceText, sourceURL: urlString, location: location
             )
         }
 
-        // 4. Last resort — bare URL
-        SharedContainerService.writeDebugLog("Extraction: bare URL fallback")
+        // Let Claude web-search the URL directly
+        SharedContainerService.writeDebugLog("Extraction: URL path with web search for \(urlString.prefix(80))")
         return try await ClaudeAPIService.extractEventFromURL(
             urlString: urlString, location: location
         )
-    }
-
-    // MARK: - Page content fetching (for URL shares)
-
-    struct PageContent {
-        var ogImageURL: String?
-        var ogText: String?     // Combined OG title + description
-        var bodyText: String?   // Visible text extracted from HTML body
-        var pageTitle: String?  // <title> tag content
-    }
-
-    /// User-Agents to try, in order. Desktop Safari first (works for most sites),
-    /// then Facebook crawler (works for Instagram/Meta sites).
-    private static let userAgents = [
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-        "facebookexternalhit/1.1"
-    ]
-
-    /// Fetch page content with multi-strategy User-Agent and body text extraction.
-    private static func fetchPageContent(from urlString: String) async -> PageContent? {
-        guard let url = URL(string: urlString) else { return nil }
-
-        var html: String?
-
-        // Try each UA until we get a substantial response
-        for ua in userAgents {
-            var request = URLRequest(url: url)
-            request.timeoutInterval = 10
-            request.setValue(ua, forHTTPHeaderField: "User-Agent")
-
-            guard let (data, response) = try? await URLSession.shared.data(for: request) else { continue }
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            SharedContainerService.writeDebugLog("Page fetch HTTP \(statusCode) with UA=\(ua.prefix(30))..., \(data.count) bytes")
-
-            if statusCode == 200, let text = String(data: data, encoding: .utf8), text.count > 500 {
-                // Check if page has real content, not just a redirect stub
-                let hasOGContent = text.contains("og:title") || text.contains("og:description") || text.contains("og:image")
-                let hasSubstantialBody = text.count > 5000
-                if hasOGContent || hasSubstantialBody {
-                    html = text
-                    break
-                }
-                SharedContainerService.writeDebugLog("Page fetch: skipping redirect stub (\(text.count) chars, no OG)")
-            }
-        }
-
-        // For Instagram URLs, also try the /embed/ variant
-        if (html == nil || html!.count < 500),
-           urlString.contains("instagram.com/p/") || urlString.contains("instagram.com/reel/") {
-            let embedURL = urlString.components(separatedBy: "?").first.map { $0 + "embed/" } ?? urlString + "embed/"
-            SharedContainerService.writeDebugLog("Trying Instagram embed: \(embedURL)")
-            guard let embedRequestURL = URL(string: embedURL) else { return nil }
-            var request = URLRequest(url: embedRequestURL)
-            request.timeoutInterval = 10
-            request.setValue(userAgents[0], forHTTPHeaderField: "User-Agent")
-            if let (data, _) = try? await URLSession.shared.data(for: request),
-               let text = String(data: data, encoding: .utf8), text.count > 500 {
-                html = text
-            }
-        }
-
-        guard let html, !html.isEmpty else {
-            SharedContainerService.writeDebugLog("Page fetch failed: no usable HTML from \(urlString)")
-            return nil
-        }
-
-        var content = PageContent()
-
-        // Extract OG tags
-        content.ogImageURL = extractMetaContent(from: html, property: "og:image")
-
-        var ogParts: [String] = []
-        if let title = extractMetaContent(from: html, property: "og:title") { ogParts.append(title) }
-        if let desc = extractMetaContent(from: html, property: "og:description") { ogParts.append(desc) }
-        if !ogParts.isEmpty {
-            content.ogText = ogParts.joined(separator: "\n")
-        }
-
-        // Extract <title> tag
-        if let regex = try? NSRegularExpression(pattern: #"<title[^>]*>([^<]+)</title>"#, options: .caseInsensitive),
-           let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
-           let range = Range(match.range(at: 1), in: html) {
-            content.pageTitle = String(html[range]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        // Extract visible body text
-        content.bodyText = extractVisibleText(from: html)
-
-        SharedContainerService.writeDebugLog("Page content: ogImage=\(content.ogImageURL != nil), ogText=\(content.ogText != nil), bodyText=\(content.bodyText?.count ?? 0) chars, title=\(content.pageTitle ?? "nil")")
-
-        return content
-    }
-
-    /// Extract a meta tag's content by property or name attribute.
-    private static func extractMetaContent(from html: String, property: String) -> String? {
-        let patterns = [
-            #"<meta[^>]*property=["']\#(property)["'][^>]*content=["']([^"']+)["']"#,
-            #"<meta[^>]*content=["']([^"']+)["'][^>]*property=["']\#(property)["']"#,
-            #"<meta[^>]*name=["']\#(property)["'][^>]*content=["']([^"']+)["']"#,
-            #"<meta[^>]*content=["']([^"']+)["'][^>]*name=["']\#(property)["']"#
-        ]
-        for pattern in patterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
-               let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
-               let range = Range(match.range(at: 1), in: html) {
-                return String(html[range])
-            }
-        }
-        return nil
-    }
-
-    /// Strip HTML tags and extract visible text content.
-    private static func extractVisibleText(from html: String) -> String? {
-        var text = html
-
-        // Remove script, style, nav, footer, header blocks
-        let blockPatterns = [
-            #"<script[^>]*>[\s\S]*?</script>"#,
-            #"<style[^>]*>[\s\S]*?</style>"#,
-            #"<nav[^>]*>[\s\S]*?</nav>"#,
-            #"<footer[^>]*>[\s\S]*?</footer>"#,
-            #"<header[^>]*>[\s\S]*?</header>"#
-        ]
-        for pattern in blockPatterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
-                text = regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: " ")
-            }
-        }
-
-        // Strip remaining HTML tags
-        if let regex = try? NSRegularExpression(pattern: "<[^>]+>") {
-            text = regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: " ")
-        }
-
-        // Decode common HTML entities
-        text = text.replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&nbsp;", with: " ")
-
-        // Collapse whitespace
-        text = text.components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-
-        let trimmed = String(text.prefix(4000))
-        return trimmed.count > 50 ? trimmed : nil  // Only return if meaningful content
-    }
-
-    /// Combine various text sources into a single context string for Claude.
-    private static func combineContext(
-        pageTitle: String? = nil,
-        bodyText: String? = nil,
-        ogText: String? = nil,
-        sourceText: String? = nil
-    ) -> String {
-        var parts: [String] = []
-        if let pageTitle, !pageTitle.isEmpty { parts.append("Page title: \(pageTitle)") }
-        if let ogText, !ogText.isEmpty { parts.append("Page summary: \(ogText)") }
-        if let sourceText, !sourceText.isEmpty { parts.append("Shared context: \(sourceText)") }
-        if let bodyText, !bodyText.isEmpty { parts.append("Page content:\n\(bodyText)") }
-        return parts.joined(separator: "\n\n")
-    }
-
-    /// Download an image URL and downsample it for the API.
-    private static func downloadAndDownsample(from urlString: String) async -> Data? {
-        // Decode HTML entities (Instagram OG URLs often have &amp; instead of &)
-        let decoded = urlString
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&#39;", with: "'")
-        guard let url = URL(string: decoded) else {
-            SharedContainerService.writeDebugLog("Image download: invalid URL \(decoded.prefix(100))")
-            return nil
-        }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 15
-        request.setValue(userAgents[0], forHTTPHeaderField: "User-Agent")
-        guard let (data, response) = try? await URLSession.shared.data(for: request) else {
-            SharedContainerService.writeDebugLog("Image download: network error for \(decoded.prefix(100))")
-            return nil
-        }
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-        SharedContainerService.writeDebugLog("Image download: HTTP \(statusCode), \(data.count) bytes")
-        guard statusCode == 200, data.count > 100 else { return nil }
-        return ImageResizer.downsample(data: data)
     }
 }
