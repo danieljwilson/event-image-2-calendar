@@ -189,8 +189,7 @@ async function handleEventPost(request: Request, env: Env): Promise<Response> {
     return jsonError(400, 'Invalid event payload');
   }
 
-  const dateKey = new Date().toISOString().slice(0, 10);
-  const key = `${PENDING_PREFIX}${dateKey}:${claims.device_id}:${event.id}`;
+  const key = pendingEventKey(claims.device_id, event.id);
 
   const storedEvent: StoredEventPayload = {
     ...event,
@@ -215,7 +214,7 @@ async function authenticateEventRequest(request: Request, env: Env) {
   return verifyAccessToken(env, token);
 }
 
-async function sendDailyDigest(env: Env): Promise<void> {
+export async function sendDailyDigest(env: Env): Promise<void> {
   const pending = await listPendingEvents(env);
   if (pending.length === 0) return;
 
@@ -234,12 +233,8 @@ async function sendDailyDigest(env: Env): Promise<void> {
       console.error('Digest email send failed at chunk', i + 1);
       return;
     }
-  }
 
-  for (const item of pending) {
-    const sentKey = item.key.replace(PENDING_PREFIX, SENT_PREFIX);
-    await env.EVENTS.put(sentKey, item.raw, { expirationTtl: SENT_EVENT_TTL_SECONDS });
-    await env.EVENTS.delete(item.key);
+    await archivePendingEntries(env, chunk);
   }
 }
 
@@ -301,6 +296,14 @@ async function sendDigestEmail(env: Env, subject: string, html: string): Promise
   return true;
 }
 
+async function archivePendingEntries(env: Env, entries: PendingEventEntry[]): Promise<void> {
+  for (const item of entries) {
+    const sentKey = item.key.replace(PENDING_PREFIX, SENT_PREFIX);
+    await env.EVENTS.put(sentKey, item.raw, { expirationTtl: SENT_EVENT_TTL_SECONDS });
+    await env.EVENTS.delete(item.key);
+  }
+}
+
 async function enforceRateLimit(
   env: Env,
   key: string,
@@ -325,4 +328,8 @@ async function enforceRateLimit(
 
 function deviceKey(deviceId: string): string {
   return `${DEVICE_PREFIX}${deviceId}`;
+}
+
+export function pendingEventKey(deviceId: string, eventId: string): string {
+  return `${PENDING_PREFIX}${deviceId}:${eventId}`;
 }

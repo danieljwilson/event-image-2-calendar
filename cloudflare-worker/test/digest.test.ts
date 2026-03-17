@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { listPendingEvents, pendingEventKey } from '../src/index';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { pendingEventKey, sendDailyDigest } from '../src/index';
 import { Env } from '../src/types';
 
 class FakeKV implements Partial<KVNamespace> {
@@ -11,6 +11,10 @@ class FakeKV implements Partial<KVNamespace> {
 
   async put(key: string, value: string): Promise<void> {
     this.store.set(key, value);
+  }
+
+  async delete(key: string): Promise<void> {
+    this.store.delete(key);
   }
 
   async list(options?: KVNamespaceListOptions): Promise<KVNamespaceListResult<unknown>> {
@@ -31,6 +35,10 @@ class FakeKV implements Partial<KVNamespace> {
       cursor: String(nextIndex),
     } as KVNamespaceListResult<unknown>;
   }
+
+  keys(): string[] {
+    return [...this.store.keys()].sort();
+  }
 }
 
 function buildEvent(id: string) {
@@ -50,24 +58,40 @@ function buildEvent(id: string) {
   };
 }
 
-describe('listPendingEvents pagination', () => {
-  it('returns all records across KV cursors', async () => {
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe('sendDailyDigest', () => {
+  it('archives each successful chunk before attempting the next one', async () => {
     const kv = new FakeKV();
 
-    for (let i = 0; i < 1001; i++) {
+    for (let i = 0; i < 101; i++) {
       const id = `evt-${i}`;
       await kv.put(pendingEventKey('device-123', id), JSON.stringify(buildEvent(id)));
     }
 
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'email-1' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response('boom', { status: 500 }));
+
+    vi.stubGlobal('fetch', fetchMock);
+
     const env: Env = {
       EVENTS: kv as KVNamespace,
-      RESEND_API_KEY: '',
-      DIGEST_EMAIL_TO: '',
-      DIGEST_EMAIL_FROM: '',
+      RESEND_API_KEY: 'resend',
+      DIGEST_EMAIL_TO: 'digest@example.com',
+      DIGEST_EMAIL_FROM: 'sender@example.com',
       JWT_SIGNING_SECRET: 'secret',
     };
 
-    const entries = await listPendingEvents(env);
-    expect(entries.length).toBe(1001);
+    await sendDailyDigest(env);
+
+    const keys = kv.keys();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(keys.filter((key) => key.startsWith('sent:'))).toHaveLength(100);
+    expect(keys.filter((key) => key.startsWith('pending:'))).toHaveLength(1);
   });
 });

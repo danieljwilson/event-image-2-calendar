@@ -114,12 +114,14 @@ struct EventListView: View {
             processor.locationService.requestLocation()
             processor.recoverStuckEvents(context: modelContext)
             processor.autoRetryEligibleEvents(context: modelContext)
+            DigestService.flushPendingEvents(context: modelContext)
             consumePendingShares()
             registerForShareNotifications()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 processor.recoverStuckEvents(context: modelContext)
+                DigestService.flushPendingEvents(context: modelContext)
                 showCamera = true
                 consumePendingShares()  // Overrides to false if shares arrived
             }
@@ -202,9 +204,14 @@ struct EventListView: View {
                             }
                             .swipeActions(edge: .leading, allowsFullSwipe: true) {
                                 Button {
-                                    CalendarService.openGoogleCalendar(event: event.toEventDetails())
-                                    event.status = .added
-                                    event.updatedAt = Date()
+                                    let details = event.toEventDetails()
+                                    CalendarService.openGoogleCalendar(event: details)
+                                    let googleCalendarURL = CalendarService.googleCalendarURL(for: details)?.absoluteString
+                                    DigestService.acceptEvent(
+                                        event,
+                                        googleCalendarURL: googleCalendarURL,
+                                        context: modelContext
+                                    )
                                 } label: {
                                     Label("Add", systemImage: "calendar.badge.plus")
                                 }
@@ -215,6 +222,18 @@ struct EventListView: View {
                                     modelContext.delete(event)
                                 } label: {
                                     Label("Dismiss", systemImage: "xmark")
+                                }
+                            }
+                        } else if event.status == .failed && !event.hasExplicitDate {
+                            // Missing date — tappable so user can enter date
+                            NavigationLink(value: event.id) {
+                                EventRowView(event: event)
+                            }
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    modelContext.delete(event)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
                                 }
                             }
                         } else if event.status == .failed {

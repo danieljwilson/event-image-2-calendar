@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeCalendarURL } from '../src/email';
+import { buildDigestEmail, sanitizeCalendarURL } from '../src/email';
 
 describe('sanitizeCalendarURL', () => {
   it('allows https calendar.google.com links', () => {
@@ -17,5 +17,28 @@ describe('sanitizeCalendarURL', () => {
 
   it('rejects non-calendar hosts', () => {
     expect(sanitizeCalendarURL('https://evil.example.com/calendar')).toBeNull();
+  });
+});
+
+describe('buildDigestEmail', () => {
+  it('renders all-day events without a midnight time label', () => {
+    const { html } = buildDigestEmail([
+      {
+        id: 'evt-1',
+        title: 'Open Studios',
+        startDate: '2026-04-12T00:00:00Z',
+        endDate: '2026-04-13T00:00:00Z',
+        venue: 'Gallery',
+        address: '123 Street',
+        description: 'desc',
+        timezone: 'Europe/Paris',
+        isAllDay: true,
+        googleCalendarURL: '',
+        createdAt: '2026-03-01T12:00:00Z',
+      },
+    ]);
+
+    expect(html).toContain('(All day)');
+    expect(html).not.toContain('12:00 AM');
   });
 });

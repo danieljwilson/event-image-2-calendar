@@ -110,13 +110,50 @@ struct EventDetailView: View {
                 .frame(minHeight: 80)
             }
 
+            // Missing date — prompt user to fill in
+            if event.status == .failed && !event.hasExplicitDate {
+                Section {
+                    Button {
+                        event.hasExplicitDate = true
+                        event.status = .ready
+                        event.errorMessage = nil
+                        event.updatedAt = Date()
+                        event.googleCalendarURL = CalendarService.googleCalendarURL(
+                            for: event.toEventDetails()
+                        )?.absoluteString
+                    } label: {
+                        Label("Confirm Date & Time", systemImage: "checkmark.circle")
+                            .frame(maxWidth: .infinity)
+                            .font(.headline)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+
+                    Button(role: .destructive) {
+                        modelContext.delete(event)
+                        dismiss()
+                    } label: {
+                        Label("Dismiss Event", systemImage: "xmark.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                }
+            }
+
             Section {
                 if event.status == .ready || event.status == .added {
                     Button {
                         let details = buildEventDetails(from: event)
                         CalendarService.openGoogleCalendar(events: details)
-                        event.status = .added
-                        event.updatedAt = Date()
+                        DigestService.acceptEvent(
+                            event,
+                            googleCalendarURL: digestGoogleCalendarURL(for: details),
+                            context: modelContext
+                        )
                     } label: {
                         Label(
                             eventCount > 1 ? "Add \(eventCount) Events to Google Calendar" :
@@ -132,25 +169,32 @@ struct EventDetailView: View {
                     .disabled(isMultiDay && multiDayMode == .selectDays && selectedDateIndices.isEmpty)
                 }
 
-                Button {
-                    let details = buildEventDetails(from: event)
-                    if let url = CalendarService.generateICSFile(for: details) {
-                        icsFileURL = url
-                        showShareSheet = true
+                if event.status == .ready || event.status == .added {
+                    Button {
+                        let details = buildEventDetails(from: event)
+                        if let url = CalendarService.generateICSFile(for: details) {
+                            icsFileURL = url
+                            showShareSheet = true
+                            DigestService.acceptEvent(
+                                event,
+                                googleCalendarURL: digestGoogleCalendarURL(for: details),
+                                context: modelContext
+                            )
+                        }
+                    } label: {
+                        Label(
+                            eventCount > 1 ? "Export \(eventCount) Events as .ics" : "Export .ics File",
+                            systemImage: "square.and.arrow.up"
+                        )
+                            .frame(maxWidth: .infinity)
                     }
-                } label: {
-                    Label(
-                        eventCount > 1 ? "Export \(eventCount) Events as .ics" : "Export .ics File",
-                        systemImage: "square.and.arrow.up"
-                    )
-                        .frame(maxWidth: .infinity)
+                    .buttonStyle(.bordered)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .disabled(isMultiDay && multiDayMode == .selectDays && selectedDateIndices.isEmpty)
                 }
-                .buttonStyle(.bordered)
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .disabled(isMultiDay && multiDayMode == .selectDays && selectedDateIndices.isEmpty)
 
-                if event.status == .failed {
+                if event.status == .failed && event.hasExplicitDate {
                     if event.canRetry {
                         Button {
                             processor.retryEvent(event, context: modelContext)
@@ -193,7 +237,7 @@ struct EventDetailView: View {
                 Section("Error Details") {
                     Text(error)
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(event.hasExplicitDate ? .red : .orange)
                 }
             }
         }
@@ -330,6 +374,11 @@ struct EventDetailView: View {
         } else {
             return [event.toEventDetails()]
         }
+    }
+
+    private func digestGoogleCalendarURL(for details: [EventDetails]) -> String? {
+        guard details.count == 1, let event = details.first else { return nil }
+        return CalendarService.googleCalendarURL(for: event)?.absoluteString
     }
 }
 

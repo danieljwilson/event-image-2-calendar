@@ -1,16 +1,20 @@
 # Architecture
 
-Event Snap is an iOS app that extracts event details from poster photos (or shared URLs/text) using Claude's vision API and creates Google Calendar events. A Cloudflare Worker provides a daily digest email pipeline with device-authenticated event ingestion.
+Event Snap is an iOS app that extracts event details from poster photos (or shared URLs/text) and creates Google Calendar events. A Cloudflare Worker provides authenticated ingestion, the daily digest email pipeline, and the production target for backend-mediated AI extraction.
+
+**Current state vs. production target:** today, `ClaudeAPIService` calls Anthropic directly from the iOS app. Phase 0 of the roadmap moves all Claude access behind the Worker so provider secrets stay server-side and extraction requests can use the same auth, rate limiting, and observability controls as the rest of the backend.
 
 ## Tech Stack
 
 - **iOS 17+** — SwiftUI, SwiftData, `@Observable` macro, zero SPM dependencies
 - **XcodeGen** — `project.yml` → `.xcodeproj`
-- **Claude API** — `claude-haiku-4-5` for vision/extraction
-- **Cloudflare Worker** — TypeScript, KV storage, cron-triggered digest
+- **Claude API** — `claude-haiku-4-5` for vision/extraction, called server-side in the production target
+- **Cloudflare Worker** — TypeScript, auth, planned extraction proxy, KV storage, cron-triggered digest
 - **Resend** — transactional email for daily digest
 
 ## System Diagram
+
+The diagram below shows the **production target** architecture. The current implementation still sends extraction requests directly from the app to Claude.
 
 ```mermaid
 flowchart LR
@@ -28,6 +32,7 @@ flowchart LR
     subgraph Edge["Cloudflare Worker"]
         Register["POST /auth/register"]
         Token["POST /auth/token"]
+        Extract["POST /extract"]
         Events["POST /events"]
         Digest["Cron: Daily Digest"]
     end
@@ -45,8 +50,6 @@ flowchart LR
 
     Ext -->|"Save image/URL/text"| Shared
     Shared -->|"Darwin notification\n+ scenePhase check"| App
-    App -->|"Base64 image or URL"| Vision
-    Vision -->|"Structured JSON"| App
 
     App -->|"Sign register/token"| Keychain
     App -->|"POST /auth/register"| Register
@@ -54,6 +57,10 @@ flowchart LR
     App -->|"POST /auth/token (signed)"| Token
     Token --> DevRec
     Token -->|"JWT (10 min)"| App
+    App -->|"Bearer JWT + image/URL/text"| Extract
+    Extract -->|"Server-side Claude request"| Vision
+    Vision -->|"Structured JSON"| Extract
+    Extract -->|"Structured JSON"| App
     App -->|"Bearer JWT"| Events
     Events --> Pending
     Events --> RL
@@ -72,11 +79,11 @@ EventImage2Calendar/                      # Main app target
 │   ├── EventDetails.swift                # @Observable event model (in-memory) + DTO
 │   └── PersistedEvent.swift              # SwiftData @Model + EventStatus enum
 ├── Services/
-│   ├── ClaudeAPIService.swift            # Claude Messages API client (vision + text + URL)
+│   ├── ClaudeAPIService.swift            # Extraction client (direct Claude today; Worker /extract in production target)
 │   ├── CalendarService.swift             # Google Calendar URL + .ics generation
 │   ├── BackgroundEventProcessor.swift    # Background API calls + SwiftData persistence
 │   ├── LocationService.swift             # CLLocationManager wrapper
-│   ├── DigestService.swift               # POST events to Cloudflare Worker
+│   ├── DigestService.swift               # Local digest outbox + POST /events flush/retry
 │   ├── WorkerAuthService.swift           # Device key registration + JWT retrieval
 │   └── WebSearchService.swift            # Google search URL helper for descriptions
 ├── Views/
@@ -86,7 +93,7 @@ EventImage2Calendar/                      # Main app target
 │   ├── EventRowView.swift                # Compact list row
 │   └── EventDetailView.swift             # Editable form + calendar buttons
 └── Utilities/
-    └── APIKeyStorage.swift               # Reads API key from Bundle (xcconfig)
+    └── APIKeyStorage.swift               # Temporary bundle key reader for local development; removed in production target
 
 ShareExtension/                           # Share Extension target
 ├── ShareViewController.swift             # NSItemProvider handler (UIKit-based)
@@ -101,7 +108,7 @@ Shared/                                   # Code shared between both targets
 cloudflare-worker/
 ├── wrangler.toml                         # Worker config + cron trigger (8 AM daily)
 └── src/
-    ├── index.ts                          # Route handlers + scheduled digest
+    ├── index.ts                          # Route handlers + scheduled digest (production target adds /extract)
     ├── email.ts                          # HTML digest email builder
     ├── security.ts                       # JWT issuance/verification + ECDSA signatures
     ├── validation.ts                     # Request/payload schema validation
@@ -120,22 +127,36 @@ Camera / Photo Library / Share Extension
                 ▼
         ClaudeAPIService
     (vision extraction or URL extraction)
+                │
+                ▼
+      Cloudflare Worker /extract
+      (production target; current implementation
+       still calls Claude directly)
     ┌── auto-retry (3x, exponential backoff: 2s/4s/8s)
     │   for retryable errors (network, 5xx, 429)
+                │
+                ▼
+           Claude API
                 │
                 ▼
     PersistedEvent (SwiftData)
     status: processing → ready
                 │
         ┌───────┴───────┐
-        ▼               ▼
-    "Add to         "Dismiss"
-     Calendar"      status → dismissed
-    status → added
+        ▼
+ "Add to Calendar"
+   or export `.ics`
         │
         ▼
-    DigestService
-    (POST to Worker)
+  status → added
+        │
+        ▼
+ DigestService
+ (queue locally, then
+  POST /events with retry)
+        │
+        ▼
+ Cloudflare Worker /events
 ```
 
 **Status values:** `processing` → `ready` → `added` | `dismissed` | `failed`
@@ -149,6 +170,17 @@ Camera / Photo Library / Share Extension
 
 **Multi-day events:** When Claude detects a date range with no specific timed event, it returns `is_multi_day: true` with an `event_dates` array. The detail view offers two modes: "Select Days" (multi-select checklist — pick any combination of dates, each becomes a separate all-day calendar event) or "Full Event" (entire date range as one event). Multi-date selection creates multiple Google Calendar entries (opened with staggered delays) or a single ICS file containing multiple VEVENTs.
 
+### Digest acceptance flow
+
+Digest delivery is now an explicit post-acceptance step rather than an extraction side effect:
+
+1. Extraction produces a local `PersistedEvent` in `.ready`
+2. User explicitly accepts the event by opening Google Calendar or exporting `.ics`
+3. `DigestService` marks the event `.added`, queues a local outbox record, and attempts `POST /events`
+4. Failed sends remain in the local outbox as `failed` and are retried on later app activations
+
+The local outbox tracks `notQueued` → `queued` → `sending` → `sent` | `failed`.
+
 ## Share Extension
 
 The Share Extension is a lightweight UIKit-based app extension (~120MB memory limit) that accepts images, URLs, and text from any app's share sheet.
@@ -161,9 +193,24 @@ The Share Extension is a lightweight UIKit-based app extension (~120MB memory li
 4. Main app picks up pending shares on notification, `scenePhase` change to `.active`, or `onAppear`
 5. Main app processes through the same `BackgroundEventProcessor` pipeline as camera photos
 
-## Claude API Integration
+## Extraction Pipeline
 
 All extraction modes use Claude's **`web_search_20250305`** tool, allowing the model to verify and complete event details (dates, addresses, venues) via web search in a single API call — no separate enrichment step.
+
+### Current implementation
+
+`ClaudeAPIService` currently calls Anthropic directly from the app using a bundle-provided `CLAUDE_API_KEY`. This is acceptable for local development but not for a public production release because the device runtime is untrusted and the provider key is extractable.
+
+### Production target
+
+In the production target, the iOS app sends image/text/URL extraction requests to `POST /extract` on the Cloudflare Worker:
+
+1. App acquires a short-lived JWT from `/auth/token`
+2. App sends the extraction payload to `/extract`
+3. Worker validates auth, enforces quotas and request limits, and injects the server-side Claude API key
+4. Worker calls Anthropic and returns structured JSON back to the app
+
+This keeps provider secrets server-side and centralizes rate limiting, cost controls, and operational visibility.
 
 Three extraction modes in `ClaudeAPIService`:
 
@@ -171,7 +218,7 @@ Three extraction modes in `ClaudeAPIService`:
 - **Text extraction** (`extractEventFromText`): Sends page text content + `web_search` tool (max 3 uses). Truncates input to 4000 chars.
 - **URL extraction** (`extractEventFromURL`): Sends bare URL + `web_search` tool (max 5 uses) — Claude searches the web to find and extract event details from the URL.
 
-**Web search response handling:** With web search enabled, Claude's response `content` array may contain `[text, server_tool_use, web_search_tool_result, text, ...]`. The parser extracts the **last** `text` block, which contains the final JSON answer after any searches.
+**Web search response handling:** With web search enabled, Claude's response `content` array may contain `[text, server_tool_use, web_search_tool_result, text, ...]`. The parser extracts the **last** `text` block, which contains the final JSON answer after any searches. This parsing behavior stays the same when the request path moves behind the Worker.
 
 **Multi-event images:** When a poster/screenshot lists several events (e.g., a cultural weekend schedule with events at different venues), `extractEvents` returns one `EventDetails` per distinct event. `BackgroundEventProcessor` applies the first result to the original `PersistedEvent` and creates additional `PersistedEvent` rows for the rest.
 
@@ -185,6 +232,24 @@ When a URL is shared (from Instagram, Safari, etc.), `BackgroundEventProcessor.e
 2. **No source text** → send bare URL to `extractEventFromURL` with `web_search` tool (Claude fetches page content via web search)
 
 **Response schema:** `{ title, start_datetime, end_datetime, venue, address, description, timezone, is_multi_day, event_dates }`
+
+### Missing Date Handling
+
+When Claude cannot determine the event date/time, `start_datetime` is returned as `null`. The `EventDetailsDTO.toEventDetails()` method falls back to `Date()` but sets `hasExplicitDate = false`. `PersistedEvent.applyExtraction()` then sets the event to `.failed` status with a message prompting the user to enter the missing date. The user can edit the date in EventDetailView and tap "Confirm Date & Time" to transition the event to `.ready` status.
+
+### Swappable Components
+
+The following components can be independently swapped or upgraded:
+
+| Component | Location | Current Value | Notes |
+|-----------|----------|---------------|-------|
+| **AI Model** | `ClaudeAPIService.swift` — `"model"` key in request bodies | `claude-haiku-4-5` | Can swap to `claude-sonnet-4-6` or `claude-opus-4-6` for higher quality (at higher cost). All three extraction methods use the same model string. |
+| **Web Search Tool** | `ClaudeAPIService.webSearchTool()` helper | `web_search_20250305` | Newer `web_search_20260209` adds dynamic filtering (`allowed_domains`, `blocked_domains`) but only works with Sonnet 4.6+ and Opus 4.6 (not Haiku 4.5). Upgrade requires changing the model too. |
+| **API Version Header** | `ClaudeAPIService.sendRequestRaw()` — `anthropic-version` header | `2023-06-01` | Must be compatible with the web search tool version in use. |
+| **User Location** | `ClaudeAPIService.webSearchTool()` — `user_location` parameter | Device timezone + country code | Provides localized web search results. Derived from `TimeZone.current` and `Locale.current.region`. Could be enhanced with reverse geocoding for city-level precision. |
+| **Image Compression** | `Shared/ImageResizer.swift` | 1024px max, JPEG 0.7 | Adjust for quality vs. API payload size trade-off. |
+| **Extraction Gateway** | `ClaudeAPIService.swift` + Worker `/extract` route | Direct app → Claude today | Production target moves this behind the Worker to keep provider secrets server-side and enforce quotas centrally. |
+| **Digest Email Provider** | `cloudflare-worker/src/email.ts` | Resend | Any transactional email API (SendGrid, Mailgun, etc.) — swap the HTTP call in `sendDigestEmail()`. |
 
 ## Calendar Integration
 
@@ -210,9 +275,33 @@ Description URLs are auto-linked as `<a href>` tags for Google Calendar renderin
 | `/events` | POST | Bearer JWT | Accept event payload |
 | `/health` | GET | None | Health check |
 
+### Planned Production Routes
+
+| Route | Method | Auth | Purpose |
+|-------|--------|------|---------|
+| `/extract` | POST | Bearer JWT (App Attest once enabled) | Proxy Claude extraction with server-side provider secret |
+| `/attest/challenge` | POST | Signed payload | Issue App Attest challenge |
+
+### Event Ingestion
+
+`POST /events` is idempotent at the storage-key level: the Worker stores pending digest entries under a stable `pending:{deviceId}:{eventId}` key so repeated client retries overwrite the same pending item rather than creating duplicates.
+
 ### Scheduled Job
 
-Daily cron (8 AM) collects `pending:*` events from KV with cursor-based pagination, sorts by start date, sends HTML digest via Resend in batches of 100, then archives to `sent:*` prefix.
+Daily cron (8 AM) collects `pending:*` events from KV with cursor-based pagination, sorts by start date, sends HTML digest via Resend in batches of 100, and archives each successful chunk to `sent:*` immediately after that chunk is delivered.
+
+**Current vs. target recipient model:** today, digest delivery is configured to a single `DIGEST_EMAIL_TO`. The production target moves this to per-user recipients and preferences once user identity is added.
+
+### Digest Delivery Semantics
+
+- The client outbox makes digest submission retryable across transient auth/network failures.
+- Worker-side idempotent pending keys prevent duplicate queue records from client retries.
+- Per-chunk archival reduces duplicate-email risk if a later chunk fails during the same cron run.
+- All-day events are carried explicitly in the payload and rendered as date-only / "All day" in digest emails.
+
+### Deferred Atomic Queue Upgrade
+
+The current design intentionally stops short of a fully atomic queue. It uses a local client outbox plus idempotent KV writes for practical reliability, but does not guarantee strict exactly-once delivery if an email send succeeds and archival fails immediately afterward. A stronger queue backed by D1 transactions or a Durable Object coordinator is deferred until scale or operational evidence justifies the extra complexity.
 
 ### Rate Limiting
 
@@ -220,20 +309,33 @@ KV-backed counters (eventually consistent):
 - 120 events/device/hour
 - 30 events/IP/minute
 
+**Production target:** Durable Objects replace KV-based counters on the hot path for atomic rate limiting, with Cloudflare WAF rules on `/events` and `/extract`.
+
+### Environments
+
+The production target uses separate `dev`, `staging`, and `production` Worker environments, each with:
+
+- Distinct KV namespaces
+- Distinct secrets
+- Distinct email sender configuration
+- A documented promotion path from staging to production
+
 ## Security
 
 ### Authentication Flow
 
 1. **Device registration:** iOS generates P-256 signing key in Keychain on first launch. Signs `register:{deviceId}:{timestamp}` and posts public key + signature to `/auth/register`.
 2. **Token issuance:** Signs `token:{deviceId}:{timestamp}` and posts to `/auth/token`. Worker verifies ECDSA signature, issues HMAC-SHA256 JWT (10 min TTL, `events:write` scope, device-bound).
-3. **Event submission:** `POST /events` with `Authorization: Bearer <jwt>`. Worker validates JWT signature, expiration, scope, and payload schema.
+3. **Extraction request (production target):** `POST /extract` with `Authorization: Bearer <jwt>`. Worker validates JWT signature, expiration, scope, request size, and rate limits before calling Claude.
+4. **Event submission:** `POST /events` with `Authorization: Bearer <jwt>`. Worker validates JWT signature, expiration, scope, and payload schema.
 
 ### Trust Boundaries
 
 - **iOS app/device runtime** — untrusted against reverse engineering
-- **Cloudflare Worker** — enforcement boundary for auth, validation, rate limiting
+- **Cloudflare Worker** — enforcement boundary for auth, validation, rate limiting, and production Claude access
 - **Cloudflare KV** — trusted for persistence; rate limiting is eventually consistent
 - **Resend** — external processor, receives only validated/sanitized data
+- **Claude API key** — must remain server-side only in the production target
 
 ### Request Validation
 
@@ -249,20 +351,21 @@ KV-backed counters (eventually consistent):
 
 ### Secrets Management
 
-| Secret | Location | Purpose |
-|--------|----------|---------|
-| `CLAUDE_API_KEY` | `Secrets.xcconfig` (gitignored) | Claude API access |
-| `RESEND_API_KEY` | Wrangler secret | Email sending |
-| `DIGEST_EMAIL_TO` | Wrangler secret | Digest recipient |
-| `JWT_SIGNING_SECRET` | Wrangler secret | JWT HMAC signing |
+| Secret | Current Location | Production Target | Purpose |
+|--------|------------------|-------------------|---------|
+| `CLAUDE_API_KEY` | `Secrets.xcconfig` (gitignored) | Wrangler/server secret only | Claude API access |
+| `RESEND_API_KEY` | Wrangler secret | Wrangler secret per environment | Email sending |
+| `DIGEST_EMAIL_TO` | Wrangler secret | Replaced by per-user recipient data | Digest delivery |
+| `JWT_SIGNING_SECRET` | Wrangler secret | Wrangler secret per environment with rotation | JWT HMAC signing |
 
-**Rotation:** Rotate `JWT_SIGNING_SECRET` immediately if compromised. All existing tokens become invalid (by design — 10-min TTL limits exposure).
+**Rotation:** Rotate `JWT_SIGNING_SECRET` immediately if compromised. All existing tokens become invalid (by design — 10-min TTL limits exposure). Production target adds multi-key rotation with active + grace windows.
 
 ### Known Limitations
 
 - Device identity is per-install; no user account identity yet
 - Device registration is signature-verified but not hardware-attested
 - KV rate limiting is eventually consistent, not strongly atomic
+- Digest queue is retryable and idempotent, but not fully atomic end-to-end
 - No centralized monitoring/alerting pipeline
 
 ## Testing & CI

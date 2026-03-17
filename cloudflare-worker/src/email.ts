@@ -20,10 +20,12 @@ export function buildDigestEmail(events: EventPayload[]): { subject: string; htm
         day: 'numeric',
         year: 'numeric',
       });
-      const timeStr = start.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
+      const dateTimeLabel = event.isAllDay
+        ? `${dateStr} (All day)`
+        : `${dateStr} at ${start.toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}`;
       const safeCalendarURL = sanitizeCalendarURL(event.googleCalendarURL);
 
       const location = [event.venue, event.address].filter(Boolean).join(', ');
@@ -32,7 +34,7 @@ export function buildDigestEmail(events: EventPayload[]): { subject: string; htm
       <div style="border:1px solid #e0e0e0; border-radius:12px; padding:20px; margin-bottom:16px; background:#fafafa;">
         <h2 style="margin:0 0 8px 0; color:#1a1a1a; font-size:18px;">${escapeHtml(event.title)}</h2>
         <p style="margin:4px 0; color:#666; font-size:14px;">
-          &#128197; ${dateStr} at ${timeStr}
+          &#128197; ${dateTimeLabel}
         </p>
         ${location ? `<p style="margin:4px 0; color:#666; font-size:14px;">&#128205; ${escapeHtml(location)}</p>` : ''}
         ${event.description ? `<p style="margin:8px 0 12px 0; color:#333; font-size:14px;">${escapeHtml(event.description)}</p>` : ''}

@@ -11,6 +11,7 @@ function buildValidEvent() {
     address: '123 Street, Paris',
     description: 'An event',
     timezone: 'Europe/Paris',
+    isAllDay: false,
     googleCalendarURL: 'https://calendar.google.com/calendar/render?action=TEMPLATE',
     createdAt: '2026-03-01T12:00:00Z',
   };

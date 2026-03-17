@@ -7,6 +7,7 @@ export interface EventPayload {
   address: string;
   description: string;
   timezone: string | null;
+  isAllDay: boolean;
   googleCalendarURL: string;
   createdAt: string;
 }

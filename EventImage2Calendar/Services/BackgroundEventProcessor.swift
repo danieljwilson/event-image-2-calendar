@@ -15,13 +15,14 @@ class BackgroundEventProcessor {
             let event = PersistedEvent(status: .failed, imageData: image.resizedForAPI())
             event.errorMessage = error.localizedDescription
             context.insert(event)
-            try? context.save()
+            Self.saveContext(context, label: "processImage-error")
             return
         }
 
         let event = PersistedEvent(status: .processing, imageData: imageData)
         context.insert(event)
-        try? context.save()
+        SharedContainerService.writeDebugLog("Inserted processing event \(event.id)")
+        Self.saveContext(context, label: "processImage")
 
         performExtraction(
             eventID: event.id,
@@ -29,8 +30,7 @@ class BackgroundEventProcessor {
             sourceURL: nil,
             sourceText: nil,
             context: context,
-            taskName: "EventExtraction",
-            sendToDigest: true
+            taskName: "EventExtraction"
         )
     }
 
@@ -44,7 +44,7 @@ class BackgroundEventProcessor {
         event.retryCount += 1
         event.errorMessage = nil
         event.updatedAt = Date()
-        try? context.save()
+        Self.saveContext(context, label: "retryEvent")
 
         performExtraction(
             eventID: event.id,
@@ -52,8 +52,7 @@ class BackgroundEventProcessor {
             sourceURL: event.sourceURL,
             sourceText: event.sourceText,
             context: context,
-            taskName: "EventRetry",
-            sendToDigest: false
+            taskName: "EventRetry"
         )
     }
 
@@ -65,7 +64,7 @@ class BackgroundEventProcessor {
             let event = PersistedEvent(status: .processing, imageData: imageData)
             event.sourceURL = share.sourceURL
             context.insert(event)
-            try? context.save()
+            Self.saveContext(context, label: "sharedImage")
 
             performExtraction(
                 eventID: event.id,
@@ -73,8 +72,7 @@ class BackgroundEventProcessor {
                 sourceURL: share.sourceURL,
                 sourceText: share.sourceText,
                 context: context,
-                taskName: "SharedImageExtraction",
-                sendToDigest: true
+                taskName: "SharedImageExtraction"
             )
 
         case .url:
@@ -86,7 +84,7 @@ class BackgroundEventProcessor {
             event.sourceURL = urlString
             event.sourceText = share.sourceText
             context.insert(event)
-            try? context.save()
+            Self.saveContext(context, label: "sharedURL")
 
             performExtraction(
                 eventID: event.id,
@@ -94,8 +92,7 @@ class BackgroundEventProcessor {
                 sourceURL: urlString,
                 sourceText: share.sourceText,
                 context: context,
-                taskName: "SharedURLExtraction",
-                sendToDigest: true
+                taskName: "SharedURLExtraction"
             )
 
         case .text:
@@ -106,7 +103,7 @@ class BackgroundEventProcessor {
             )
             event.sourceText = text
             context.insert(event)
-            try? context.save()
+            Self.saveContext(context, label: "sharedText")
 
             performExtraction(
                 eventID: event.id,
@@ -114,8 +111,7 @@ class BackgroundEventProcessor {
                 sourceURL: nil,
                 sourceText: text,
                 context: context,
-                taskName: "SharedTextExtraction",
-                sendToDigest: true
+                taskName: "SharedTextExtraction"
             )
         }
     }
@@ -129,8 +125,7 @@ class BackgroundEventProcessor {
         sourceURL: String?,
         sourceText: String?,
         context: ModelContext,
-        taskName: String,
-        sendToDigest: Bool
+        taskName: String
     ) {
         let location = locationService.currentLocation
 
@@ -185,29 +180,34 @@ class BackgroundEventProcessor {
                         let descriptor = FetchDescriptor<PersistedEvent>(
                             predicate: #Predicate { $0.id == eventID }
                         )
-                        guard let persisted = try? context.fetch(descriptor).first else {
-                            UIApplication.shared.endBackgroundTask(bgTaskID)
-                            return
+                        do {
+                            guard let persisted = try context.fetch(descriptor).first else {
+                                SharedContainerService.writeDebugLog("SwiftData: no event matched \(eventID)")
+                                UIApplication.shared.endBackgroundTask(bgTaskID)
+                                return
+                            }
+
+                            Self.applyAndFinalize(finalDetails[0], to: persisted)
+
+                            for i in 1..<finalDetails.count {
+                                let extra = PersistedEvent(status: .processing, imageData: imageData)
+                                extra.sourceURL = sourceURL
+                                extra.sourceText = sourceText
+                                context.insert(extra)
+                                Self.applyAndFinalize(finalDetails[i], to: extra)
+                            }
+
+                            Self.saveContext(context, label: "extraction-success")
+                        } catch {
+                            SharedContainerService.writeDebugLog("SwiftData fetch error: \(error)")
                         }
-
-                        // Apply first event to the original PersistedEvent
-                        Self.applyAndFinalize(finalDetails[0], to: persisted, sendToDigest: sendToDigest)
-
-                        // Create additional PersistedEvents for remaining events
-                        for i in 1..<finalDetails.count {
-                            let extra = PersistedEvent(status: .processing, imageData: imageData)
-                            extra.sourceURL = sourceURL
-                            context.insert(extra)
-                            Self.applyAndFinalize(finalDetails[i], to: extra, sendToDigest: sendToDigest)
-                        }
-
-                        try? context.save()
                         UIApplication.shared.endBackgroundTask(bgTaskID)
                     }
                     return
 
                 } catch {
                     lastError = error
+                    SharedContainerService.writeDebugLog("Extraction attempt \(attempt + 1) failed: \(error)")
                     let isRetryable = (error as? ClaudeAPIError)?.isRetryable ?? (error is URLError)
                     if !isRetryable || attempt == maxAutoRetries - 1 { break }
                     let delay = baseDelay * UInt64(1 << attempt)
@@ -222,23 +222,29 @@ class BackgroundEventProcessor {
                 errorMessage = lastError?.localizedDescription ?? "Unknown error"
             }
 
+            SharedContainerService.writeDebugLog("Extraction failed after retries: \(errorMessage)")
+
             await MainActor.run {
                 let descriptor = FetchDescriptor<PersistedEvent>(
                     predicate: #Predicate { $0.id == eventID }
                 )
-                if let persisted = try? context.fetch(descriptor).first {
-                    persisted.status = .failed
-                    persisted.errorMessage = errorMessage
-                    persisted.updatedAt = Date()
-                    try? context.save()
+                do {
+                    if let persisted = try context.fetch(descriptor).first {
+                        persisted.status = .failed
+                        persisted.errorMessage = errorMessage
+                        persisted.updatedAt = Date()
+                        Self.saveContext(context, label: "extraction-failure")
+                    }
+                } catch {
+                    SharedContainerService.writeDebugLog("SwiftData fetch error (failure path): \(error)")
                 }
                 UIApplication.shared.endBackgroundTask(bgTaskID)
             }
         }
     }
 
-    /// Apply extraction results to a PersistedEvent and send to digest if needed.
-    private static func applyAndFinalize(_ details: EventDetails, to persisted: PersistedEvent, sendToDigest: Bool) {
+    /// Apply extraction results to a PersistedEvent and add a search link when needed.
+    private static func applyAndFinalize(_ details: EventDetails, to persisted: PersistedEvent) {
         persisted.applyExtraction(details)
 
         if !persisted.eventDescription.contains("http") {
@@ -248,13 +254,6 @@ class BackgroundEventProcessor {
                 address: persisted.address
             )
             persisted.eventDescription += "\n\n\(link)"
-        }
-
-        if sendToDigest {
-            let digestData = DigestService.EventPayload(from: persisted)
-            Task.detached {
-                await DigestService.sendToDigest(digestData)
-            }
         }
     }
 
@@ -273,7 +272,7 @@ class BackgroundEventProcessor {
             event.updatedAt = Date()
             changed = true
         }
-        if changed { try? context.save() }
+        if changed { Self.saveContext(context, label: "recoverStuck") }
     }
 
     @MainActor
@@ -284,6 +283,17 @@ class BackgroundEventProcessor {
         guard let events = try? context.fetch(descriptor) else { return }
         for event in events where event.canRetry && event.hasRetryableError {
             retryEvent(event, context: context)
+        }
+    }
+
+    // MARK: - Helpers
+
+    private static func saveContext(_ context: ModelContext, label: String) {
+        do {
+            try context.save()
+            SharedContainerService.writeDebugLog("SwiftData save OK (\(label))")
+        } catch {
+            SharedContainerService.writeDebugLog("SwiftData save FAILED (\(label)): \(error)")
         }
     }
 

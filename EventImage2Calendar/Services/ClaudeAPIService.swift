@@ -110,6 +110,14 @@ enum ClaudeAPIService {
            (e.g., exhibition run), extract the timed event. Mention the range in description.
         6. If you cannot determine a date, set start_datetime and end_datetime to null. \
            Do NOT default to today.
+        7. ALWAYS populate start_datetime with the event's date and time from the image. \
+           If the image shows "16h30", "7pm", "doors open 20:00", etc., that time MUST \
+           appear in start_datetime as ISO 8601 (e.g. 2026-03-21T16:30:00), not just \
+           in the description. The start_datetime field is the ONLY field used for \
+           calendar creation — the description is not parsed for dates.
+        8. Use web search to find the actual event page URL and include it in the \
+           description field. Prefer direct links (venue page, ticket page, event \
+           listing) over search engine URLs.
 
         Respond with ONLY a JSON array (even for one event), no markdown fences. Schema per object:
         {
@@ -118,7 +126,7 @@ enum ClaudeAPIService {
           "end_datetime": "ISO 8601 or date-only",
           "venue": "Specific venue name",
           "address": "Full address with city and postal code",
-          "description": "1-3 sentences. Include source URLs if visible.",
+          "description": "1-3 sentences. Include direct event page URL if found via web search.",
           "timezone": "IANA timezone (e.g. Europe/Paris)",
           "is_multi_day": false,
           "event_dates": []
@@ -148,13 +156,7 @@ enum ClaudeAPIService {
             "model": "claude-haiku-4-5",
             "max_tokens": 4096,
             "system": systemPrompt,
-            "tools": [
-                [
-                    "type": "web_search_20250305",
-                    "name": "web_search",
-                    "max_uses": 5
-                ]
-            ],
+            "tools": [Self.webSearchTool(maxUses: 5)],
             "messages": [
                 [
                     "role": "user",
@@ -202,7 +204,11 @@ enum ClaudeAPIService {
         You are an expert event detail extractor. The user has shared a URL. \
         Use web search to find the event page and extract complete details.
 
-        Today is \(Self.todayString()), \(Self.todayDayOfWeek()). All dates must be in the future.
+        Today is \(Self.todayString()), \(Self.todayDayOfWeek()). All dates must be in the future. \
+        ALWAYS populate start_datetime with the actual event date and time as ISO 8601. \
+        The start_datetime field is the ONLY field used for calendar creation. \
+        If you cannot determine the date, set start_datetime to null — do NOT default to today. \
+        Include the direct event page URL in the description.
 
         Respond with ONLY a JSON object, no markdown fences. Schema:
         {
@@ -211,7 +217,7 @@ enum ClaudeAPIService {
           "end_datetime": "ISO 8601 or date-only",
           "venue": "Specific venue name",
           "address": "Full address with city and postal code",
-          "description": "1-3 sentences. Include the source URL.",
+          "description": "1-3 sentences. Include direct event page URL.",
           "timezone": "IANA timezone",
           "is_multi_day": false,
           "event_dates": []
@@ -229,13 +235,7 @@ enum ClaudeAPIService {
             "model": "claude-haiku-4-5",
             "max_tokens": 2048,
             "system": systemPrompt,
-            "tools": [
-                [
-                    "type": "web_search_20250305",
-                    "name": "web_search",
-                    "max_uses": 5
-                ]
-            ],
+            "tools": [Self.webSearchTool(maxUses: 5)],
             "messages": [
                 [
                     "role": "user",
@@ -271,7 +271,11 @@ enum ClaudeAPIService {
         You are an expert event detail extractor. Analyze the text and extract the primary \
         attendable event. Use web search to verify and complete details when needed.
 
-        Today is \(Self.todayString()), \(Self.todayDayOfWeek()). All dates must be in the future.
+        Today is \(Self.todayString()), \(Self.todayDayOfWeek()). All dates must be in the future. \
+        ALWAYS populate start_datetime with the actual event date and time as ISO 8601. \
+        The start_datetime field is the ONLY field used for calendar creation. \
+        If you cannot determine the date, set start_datetime to null — do NOT default to today. \
+        Include the direct event page URL in the description.
 
         Respond with ONLY a JSON object, no markdown fences. Schema:
         {
@@ -280,7 +284,7 @@ enum ClaudeAPIService {
           "end_datetime": "ISO 8601 or date-only",
           "venue": "Specific venue name",
           "address": "Full address with city and postal code",
-          "description": "1-3 sentences. Include source URL if available.",
+          "description": "1-3 sentences. Include direct event page URL.",
           "timezone": "IANA timezone",
           "is_multi_day": false,
           "event_dates": []
@@ -305,13 +309,7 @@ enum ClaudeAPIService {
             "model": "claude-haiku-4-5",
             "max_tokens": 2048,
             "system": systemPrompt,
-            "tools": [
-                [
-                    "type": "web_search_20250305",
-                    "name": "web_search",
-                    "max_uses": 3
-                ]
-            ],
+            "tools": [Self.webSearchTool(maxUses: 3)],
             "messages": [
                 [
                     "role": "user",
@@ -387,11 +385,14 @@ enum ClaudeAPIService {
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
         request.timeoutInterval = 60
 
+        SharedContainerService.writeDebugLog("API: sending request (\(request.httpBody?.count ?? 0) bytes)")
+
         let data: Data
         let response: URLResponse
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
+            SharedContainerService.writeDebugLog("API: network error: \(error)")
             throw ClaudeAPIError.apiError("Network error: \(error.localizedDescription)")
         }
 
@@ -399,18 +400,27 @@ enum ClaudeAPIService {
             throw ClaudeAPIError.invalidResponse
         }
 
+        SharedContainerService.writeDebugLog("API: HTTP \(httpResponse.statusCode), response \(data.count) bytes")
+
         guard httpResponse.statusCode == 200 else {
             let body = String(data: data, encoding: .utf8) ?? "Unknown error"
+            SharedContainerService.writeDebugLog("API: error body: \(String(body.prefix(500)))")
             throw ClaudeAPIError.apiError("HTTP \(httpResponse.statusCode): \(body)")
         }
 
         let claudeResponse = try JSONDecoder().decode(ClaudeResponse.self, from: data)
-        // Use LAST text block — with web_search, the final text block contains the JSON answer
-        guard let textContent = claudeResponse.content.last(where: { $0.type == "text" }),
-              let jsonString = textContent.text else {
+        // With web_search + citations, Claude splits JSON across multiple text blocks.
+        // Concatenate all text blocks so extractJSON/extractJSONArray can find the full JSON.
+        let allText = claudeResponse.content
+            .filter { $0.type == "text" }
+            .compactMap(\.text)
+        guard !allText.isEmpty else {
+            SharedContainerService.writeDebugLog("API: no text block found in response")
             throw ClaudeAPIError.invalidResponse
         }
+        let jsonString = allText.joined()
 
+        SharedContainerService.writeDebugLog("API: extracted text (\(jsonString.count) chars)")
         return jsonString
     }
 
@@ -540,6 +550,29 @@ enum ClaudeAPIService {
         }
 
         return repaired
+    }
+
+    /// Build web search tool config with user_location for localized results.
+    private static func webSearchTool(maxUses: Int) -> [String: Any] {
+        var tool: [String: Any] = [
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": maxUses
+        ]
+
+        // Add user_location from device timezone for localized search results
+        let tz = TimeZone.current
+        let regionCode = Locale.current.region?.identifier
+        var userLocation: [String: Any] = [
+            "type": "approximate",
+            "timezone": tz.identifier
+        ]
+        if let regionCode {
+            userLocation["country"] = regionCode
+        }
+        tool["user_location"] = userLocation
+
+        return tool
     }
 
     private static func todayString() -> String {

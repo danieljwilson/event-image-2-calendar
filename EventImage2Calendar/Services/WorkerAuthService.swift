@@ -50,6 +50,7 @@ enum WorkerAuthService {
         )
 
         guard await postJSON(registerBody, path: "auth/register", expectedStatuses: [200, 201]) != nil else {
+            SharedContainerService.writeDebugLog("Worker auth: register failed")
             return nil
         }
 
@@ -67,6 +68,7 @@ enum WorkerAuthService {
 
         guard let responseData = await postJSON(tokenBody, path: "auth/token", expectedStatuses: [200]),
               let tokenResponse = try? JSONDecoder().decode(TokenResponse.self, from: responseData) else {
+            SharedContainerService.writeDebugLog("Worker auth: token fetch failed")
             return nil
         }
 
@@ -90,10 +92,17 @@ enum WorkerAuthService {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse,
                   expectedStatuses.contains(httpResponse.statusCode) else {
+                if let httpResponse = response as? HTTPURLResponse {
+                    let body = String(data: data, encoding: .utf8) ?? "Unknown error"
+                    SharedContainerService.writeDebugLog(
+                        "Worker auth: HTTP \(httpResponse.statusCode) for \(path): \(String(body.prefix(200)))"
+                    )
+                }
                 return nil
             }
             return data
         } catch {
+            SharedContainerService.writeDebugLog("Worker auth: network error for \(path): \(error.localizedDescription)")
             return nil
         }
     }

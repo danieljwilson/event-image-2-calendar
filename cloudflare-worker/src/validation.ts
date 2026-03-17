@@ -78,9 +78,10 @@ export function validateEventPayload(input: unknown): EventPayload | null {
   const description = normalizeString(input.description, 0, MAX_EVENT_DESCRIPTION_LENGTH);
   const createdAt = normalizeString(input.createdAt, 1, 64);
   const googleCalendarURL = normalizeString(input.googleCalendarURL, 0, MAX_URL_LENGTH);
+  const isAllDay = asBoolean(input.isAllDay);
   const timezoneRaw = input.timezone;
 
-  if (!id || !title || !startDate || !endDate || description == null || venue == null || address == null || !createdAt || googleCalendarURL == null) {
+  if (!id || !title || !startDate || !endDate || description == null || venue == null || address == null || !createdAt || googleCalendarURL == null || isAllDay == null) {
     return null;
   }
 
@@ -106,6 +107,7 @@ export function validateEventPayload(input: unknown): EventPayload | null {
     address,
     description,
     timezone,
+    isAllDay,
     googleCalendarURL,
     createdAt,
   };
@@ -152,6 +154,10 @@ function asString(value: unknown): string | null {
 
 function asNumber(value: unknown): number | null {
   return typeof value === 'number' ? value : null;
+}
+
+function asBoolean(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
