@@ -27,6 +27,10 @@ enum WorkerAuthService {
         let expiresAt: Int64
     }
 
+    static func clearCachedToken() {
+        Task { await tokenCache.clear() }
+    }
+
     static func accessToken() async -> String? {
         if let cached = await tokenCache.validToken() {
             return cached
@@ -196,5 +200,10 @@ private actor AccessTokenCache {
     func store(token: String, expiresAtUnix: Int64) {
         self.token = token
         self.expiresAt = Date(timeIntervalSince1970: TimeInterval(expiresAtUnix))
+    }
+
+    func clear() {
+        self.token = nil
+        self.expiresAt = .distantPast
     }
 }

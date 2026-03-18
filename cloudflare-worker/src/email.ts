@@ -9,7 +9,7 @@ export function buildDigestEmail(events: EventPayload[]): { subject: string; htm
     day: 'numeric',
   });
 
-  const subject = `Event Snap Digest - ${events.length} event${events.length > 1 ? 's' : ''} (${today})`;
+  const subject = `Event Snap: ${events.length} new event${events.length !== 1 ? 's' : ''}`;
 
   const eventCards = events
     .map((event) => {

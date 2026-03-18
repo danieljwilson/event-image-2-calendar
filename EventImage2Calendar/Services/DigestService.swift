@@ -35,23 +35,35 @@ enum DigestService {
     }
 
     @MainActor
-    static func acceptEvent(
-        _ event: PersistedEvent,
-        googleCalendarURL: String?,
-        context: ModelContext
-    ) {
-        event.status = .added
-        event.updatedAt = Date()
-        event.googleCalendarURL = googleCalendarURL
+    static func queueEvent(_ event: PersistedEvent, context: ModelContext) {
+        guard UserDefaults.standard.bool(forKey: "digestEnabled") else { return }
+        guard event.digestStatus == .notQueued else { return }
 
-        if event.digestStatus != .sent {
-            event.digestStatus = .queued
-            event.digestQueuedAt = Date()
-            event.digestLastError = nil
+        event.digestStatus = .queued
+        event.digestQueuedAt = Date()
+        event.digestLastError = nil
+
+        saveContext(context, label: "digest-queue")
+        SharedContainerService.writeDebugLog("Digest: queued event \(event.id)")
+    }
+
+    @MainActor
+    static func dequeueEvent(_ event: PersistedEvent, context: ModelContext) {
+        let previousStatus = event.digestStatus
+
+        if previousStatus == .sent || previousStatus == .sending {
+            let eventID = event.id.uuidString
+            Task {
+                await deleteFromWorker(eventID: eventID)
+            }
         }
 
-        saveContext(context, label: "digest-accept")
-        flushPendingEvents(context: context)
+        event.digestStatus = .notQueued
+        event.digestQueuedAt = nil
+        event.digestLastError = nil
+
+        saveContext(context, label: "digest-dequeue")
+        SharedContainerService.writeDebugLog("Digest: dequeued event \(event.id) (was \(previousStatus))")
     }
 
     @MainActor
@@ -166,6 +178,28 @@ enum DigestService {
             return .sent
         } catch {
             return .failed("Network error: \(error.localizedDescription)")
+        }
+    }
+
+    private static func deleteFromWorker(eventID: String) async {
+        guard let accessToken = await WorkerAuthService.accessToken() else {
+            SharedContainerService.writeDebugLog("Digest: delete skipped, no auth for \(eventID)")
+            return
+        }
+
+        guard let deleteURL = URL(string: workerURL.absoluteString + "/\(eventID)") else { return }
+
+        var request = URLRequest(url: deleteURL)
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            SharedContainerService.writeDebugLog("Digest: delete \(eventID) → HTTP \(status)")
+        } catch {
+            SharedContainerService.writeDebugLog("Digest: delete \(eventID) failed: \(error.localizedDescription)")
         }
     }
 

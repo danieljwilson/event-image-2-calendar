@@ -1,13 +1,17 @@
 import { EventPayload, IssueTokenRequest, RegisterDeviceRequest } from './types';
 
-const MAX_BODY_CHARS = 32768;
+export const MAX_BODY_CHARS = 32768;
+export const MAX_EXTRACT_BODY_CHARS = 2 * 1024 * 1024; // 2 MB for base64 image payloads
 const MAX_EVENT_DESCRIPTION_LENGTH = 4000;
 const MAX_SHORT_TEXT_LENGTH = 200;
 const MAX_URL_LENGTH = 2048;
 const DEVICE_ID_REGEX = /^[A-Za-z0-9-]{16,64}$/;
 const BASE64URL_REGEX = /^[A-Za-z0-9_-]+$/;
 
-export async function readJSONRequest(request: Request): Promise<{ data: unknown } | { error: Response }> {
+export async function readJSONRequest(
+  request: Request,
+  maxBodyChars: number = MAX_BODY_CHARS
+): Promise<{ data: unknown } | { error: Response }> {
   const contentType = request.headers.get('content-type') ?? '';
   if (!contentType.toLowerCase().includes('application/json')) {
     return { error: jsonError(415, 'Content-Type must be application/json') };
@@ -24,7 +28,7 @@ export async function readJSONRequest(request: Request): Promise<{ data: unknown
     return { error: jsonError(400, 'Request body is required') };
   }
 
-  if (text.length > MAX_BODY_CHARS) {
+  if (text.length > maxBodyChars) {
     return { error: jsonError(413, 'Request body too large') };
   }
 
@@ -111,6 +115,46 @@ export function validateEventPayload(input: unknown): EventPayload | null {
     googleCalendarURL,
     createdAt,
   };
+}
+
+const ALLOWED_MODELS = new Set(['claude-haiku-4-5']);
+const MAX_EXTRACT_TOKENS = 4096;
+
+export interface ExtractRequestBody {
+  model: string;
+  max_tokens: number;
+  system: string;
+  messages: unknown[];
+  tools?: unknown[];
+}
+
+export function validateExtractRequest(input: unknown): ExtractRequestBody | null {
+  if (!isRecord(input)) return null;
+
+  const model = asString(input.model);
+  if (!model || !ALLOWED_MODELS.has(model)) return null;
+
+  const maxTokens = asNumber(input.max_tokens);
+  if (maxTokens == null || maxTokens < 1 || maxTokens > MAX_EXTRACT_TOKENS) return null;
+
+  const system = asString(input.system);
+  if (!system || system.length === 0) return null;
+
+  if (!Array.isArray(input.messages) || input.messages.length === 0) return null;
+
+  const result: ExtractRequestBody = {
+    model,
+    max_tokens: maxTokens,
+    system,
+    messages: input.messages,
+  };
+
+  if (input.tools !== undefined) {
+    if (!Array.isArray(input.tools)) return null;
+    result.tools = input.tools;
+  }
+
+  return result;
 }
 
 export function isFreshTimestamp(timestamp: number, maxSkewSeconds = 300): boolean {

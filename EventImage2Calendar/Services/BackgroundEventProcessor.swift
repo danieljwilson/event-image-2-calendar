@@ -189,15 +189,22 @@ class BackgroundEventProcessor {
 
                             Self.applyAndFinalize(finalDetails[0], to: persisted)
 
+                            var allEvents = [persisted]
                             for i in 1..<finalDetails.count {
                                 let extra = PersistedEvent(status: .processing, imageData: imageData)
                                 extra.sourceURL = sourceURL
                                 extra.sourceText = sourceText
                                 context.insert(extra)
                                 Self.applyAndFinalize(finalDetails[i], to: extra)
+                                allEvents.append(extra)
                             }
 
                             Self.saveContext(context, label: "extraction-success")
+
+                            for event in allEvents where event.status == .ready {
+                                DigestService.queueEvent(event, context: context)
+                            }
+                            DigestService.flushPendingEvents(context: context)
                         } catch {
                             SharedContainerService.writeDebugLog("SwiftData fetch error: \(error)")
                         }

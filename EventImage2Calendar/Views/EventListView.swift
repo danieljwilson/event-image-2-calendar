@@ -6,9 +6,12 @@ struct EventListView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \PersistedEvent.createdAt, order: .reverse) private var events: [PersistedEvent]
     @State private var processor = BackgroundEventProcessor()
-    @State private var showCamera = true
+    @AppStorage("openCameraOnLaunch") private var openCameraOnLaunch = true
+    @State private var showCamera = false
+    @State private var hasAppeared = false
     @State private var showLibrary = false
     @State private var showDebugLog = false
+    @State private var showSettings = false
     @State private var selectedTab: Tab = .pending
     @State private var correctionEvent: PersistedEvent?
     @State private var expandedMonths: Set<String> = []
@@ -87,6 +90,13 @@ struct EventListView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showDebugLog = true
@@ -94,6 +104,9 @@ struct EventListView: View {
                         Image(systemName: "ladybug")
                     }
                 }
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
             }
             .sheet(isPresented: $showDebugLog) {
                 NavigationStack {
@@ -155,6 +168,10 @@ struct EventListView: View {
             }
         }
         .onAppear {
+            if !hasAppeared {
+                hasAppeared = true
+                showCamera = openCameraOnLaunch
+            }
             processor.locationService.requestLocation()
             processor.recoverStuckEvents(context: modelContext)
             processor.autoRetryEligibleEvents(context: modelContext)
@@ -250,11 +267,10 @@ struct EventListView: View {
                                     let details = event.toEventDetails()
                                     CalendarService.openGoogleCalendar(event: details)
                                     let googleCalendarURL = CalendarService.googleCalendarURL(for: details)?.absoluteString
-                                    DigestService.acceptEvent(
-                                        event,
-                                        googleCalendarURL: googleCalendarURL,
-                                        context: modelContext
-                                    )
+                                    event.status = .added
+                                    event.updatedAt = Date()
+                                    event.googleCalendarURL = googleCalendarURL
+                                    DigestService.dequeueEvent(event, context: modelContext)
                                 } label: {
                                     Label("Add", systemImage: "calendar.badge.plus")
                                 }
@@ -262,6 +278,7 @@ struct EventListView: View {
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
+                                    DigestService.dequeueEvent(event, context: modelContext)
                                     modelContext.delete(event)
                                 } label: {
                                     Label("Dismiss", systemImage: "xmark")
@@ -464,6 +481,7 @@ private struct DateCorrectionSheet: View {
                     .listRowBackground(Color.clear)
 
                     Button(role: .destructive) {
+                        DigestService.dequeueEvent(event, context: modelContext)
                         modelContext.delete(event)
                         dismiss()
                     } label: {
@@ -569,5 +587,8 @@ private struct DateCorrectionSheet: View {
         event.googleCalendarURL = CalendarService.googleCalendarURL(
             for: event.toEventDetails()
         )?.absoluteString
+
+        DigestService.queueEvent(event, context: modelContext)
+        DigestService.flushPendingEvents(context: modelContext)
     }
 }

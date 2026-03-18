@@ -52,4 +52,5 @@ export interface Env {
   DIGEST_EMAIL_TO: string;
   DIGEST_EMAIL_FROM: string;
   JWT_SIGNING_SECRET: string;
+  CLAUDE_API_KEY: string;
 }

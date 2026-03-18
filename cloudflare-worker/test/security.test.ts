@@ -17,6 +17,7 @@ function testEnv(secret = 'test-secret'): Env {
     DIGEST_EMAIL_TO: '',
     DIGEST_EMAIL_FROM: '',
     JWT_SIGNING_SECRET: secret,
+    CLAUDE_API_KEY: '',
   };
 }
 

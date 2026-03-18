@@ -47,11 +47,13 @@ Status of Event Snap features and the path to a production-ready App Store relea
 - [x] Cursor-paginated KV reads for digest assembly
 - [x] Batched HTML digest email via Resend
 - [x] Output sanitization (HTML escaping, URL allowlisting)
-- [x] Digest queue only after explicit user acceptance (Google Calendar open or `.ics` export)
+- [x] Digest auto-queues on extraction success, dequeues when user adds/dismisses (reminder-based)
+- [x] Worker `DELETE /events/:id` endpoint for removing acted-on events from digest queue
 - [x] Local iOS digest outbox with queued/sending/sent/failed retry state
 - [x] Idempotent Worker `/events` writes keyed by device + event ID
 - [x] Per-chunk digest archival after each successful email send
 - [x] All-day event support in digest payload + email rendering
+- [x] Settings view with digest email opt-out and camera-on-launch preference
 
 ### Infrastructure
 - [x] XcodeGen project generation
@@ -64,10 +66,10 @@ Status of Event Snap features and the path to a production-ready App Store relea
 Priority: **Critical** — must be complete before any public beta or App Store submission.
 
 ### Backend-proxy Claude access
-- [ ] Move Claude extraction behind a trusted backend/worker endpoint
-- [ ] Remove `CLAUDE_API_KEY` from the app bundle / `Info.plist`
-- [ ] Keep Anthropic credentials server-side only (Wrangler secret or equivalent)
-- [ ] Apply request size limits and extraction quotas to the new backend endpoint
+- [x] Move Claude extraction behind a trusted backend/worker endpoint (`POST /extract`)
+- [x] Remove `CLAUDE_API_KEY` from the app bundle / `Info.plist`
+- [x] Keep Anthropic credentials server-side only (Wrangler secret)
+- [x] Apply request size limits (2MB body, model allowlist, max_tokens cap) and extraction quotas (50/device/hour, 10/IP/minute)
 - [ ] Add cost/budget monitoring for Claude usage
 
 ### Environment separation
@@ -75,6 +77,40 @@ Priority: **Critical** — must be complete before any public beta or App Store 
 - [ ] Use separate KV namespaces and secrets per environment
 - [ ] Document deploy/promotion flow from staging to production
 - [ ] Configure a verified production Resend sender domain
+
+## Paperclip Integration
+
+Priority: **High** — adopt [Paperclip](https://github.com/paperclipai/paperclip) for AI agent orchestration.
+
+Paperclip is an open-source Node.js server + React UI that orchestrates teams of AI agents with org charts, budgets, governance, goal alignment, and task coordination. Integrating Paperclip would move Event Snap's extraction pipeline and development workflow from ad-hoc single-agent calls to a managed, auditable multi-agent system.
+
+### Evaluation & Setup
+- [ ] Deploy Paperclip locally and evaluate orchestration model against Event Snap's extraction pipeline
+- [ ] Define agent roles: extraction agent (Claude vision), enrichment agent (web search), quality-check agent (date/time validation)
+- [ ] Map current `BackgroundEventProcessor` → `ClaudeAPIService` flow to Paperclip task/ticket model
+
+### Extraction Pipeline Migration
+- [ ] Move image extraction behind a Paperclip-managed agent with budget controls and cost tracking
+- [ ] Add a validation agent that cross-checks extracted dates/times against web search results before marking `date_confirmed`
+- [ ] Use Paperclip's heartbeat system for scheduled digest assembly and retry of failed extractions
+- [ ] Replace manual retry logic with Paperclip's built-in task lifecycle and delegation
+
+### Development Workflow
+- [ ] Use Paperclip to coordinate coding agents (Cursor, Claude Code) for parallel feature development
+- [ ] Set up goal hierarchy: product goals → feature tasks → agent assignments
+- [ ] Configure budget limits per agent to control API costs during development
+- [ ] Adopt [Superpowers](https://github.com/obra/superpowers) agentic skills framework for structured development methodology
+- [ ] Integrate Superpowers brainstorming + spec-writing workflow into Paperclip's goal/task pipeline
+- [ ] Use Superpowers subagent-driven-development for plan execution with two-stage review (spec compliance, then code quality)
+- [ ] Enforce Superpowers TDD workflow (RED-GREEN-REFACTOR) across all coding agents via skill injection
+- [ ] Use Superpowers git worktrees for parallel feature branches managed by Paperclip's task assignments
+
+### Production Operations
+- [ ] Paperclip dashboard for monitoring extraction success rates, costs, and agent health
+- [ ] Governance rules for extraction quality thresholds (auto-pause agents with high error rates)
+- [ ] Integrate Paperclip's audit log with the existing Cloudflare Worker logging infrastructure
+
+---
 
 ## Phase 1: Polish & Testing
 
@@ -172,7 +208,7 @@ These are accepted trade-offs in the current architecture:
 
 | Limitation | Impact | Resolution Phase |
 |-----------|--------|-----------------|
-| Claude API key currently shipped in the client app bundle | Extractable secret, direct API abuse/cost risk | Phase 0 |
+| ~~Claude API key currently shipped in the client app bundle~~ | ~~Extractable secret, direct API abuse/cost risk~~ | ~~Phase 0~~ (resolved) |
 | Device-only identity (no user accounts) | Can't bind events to a person across devices | Phase 3 |
 | No hardware attestation | Scripted clients could register fake devices | Phase 2 |
 | KV rate limiting eventually consistent | Brief burst windows possible | Phase 2 |

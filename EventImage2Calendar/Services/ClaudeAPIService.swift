@@ -2,7 +2,7 @@ import Foundation
 import CoreLocation
 
 enum ClaudeAPIError: LocalizedError {
-    case noAPIKey
+    case authFailed
     case invalidResponse
     case apiError(String)
     case decodingFailed(String)
@@ -10,8 +10,8 @@ enum ClaudeAPIError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .noAPIKey:
-            return "No API key configured. Add your Claude API key to Secrets.xcconfig."
+        case .authFailed:
+            return "Could not authenticate with the extraction service."
         case .invalidResponse:
             return "Received an invalid response from the API."
         case .apiError(let message):
@@ -25,28 +25,30 @@ enum ClaudeAPIError: LocalizedError {
 
     var isRetryable: Bool {
         switch self {
-        case .noAPIKey, .invalidResponse, .decodingFailed, .noEventFound:
+        case .authFailed, .invalidResponse, .decodingFailed, .noEventFound:
             return false
         case .apiError(let message):
             if message.hasPrefix("Network error:") { return true }
             if message.contains("HTTP 5") { return true }
             if message.contains("HTTP 429") { return true }
+            if message.contains("HTTP 413") { return true }
             return false
         }
     }
 
     var userFacingMessage: String {
         switch self {
-        case .noAPIKey:
-            return "API key not configured. Check app settings."
+        case .authFailed:
+            return "Authentication failed. Please restart the app."
         case .invalidResponse:
             return "Received an unexpected response. Try again."
         case .apiError(let message):
             if message.hasPrefix("Network error:") { return "Network error. Will retry automatically." }
             if message.contains("HTTP 5") { return "Server error. Will retry automatically." }
             if message.contains("HTTP 429") { return "Too many requests. Will retry shortly." }
+            if message.contains("HTTP 413") { return "Image too large. Try a smaller photo." }
             if message.contains("HTTP 401") || message.contains("HTTP 403") {
-                return "Authentication error. Check your API key."
+                return "Authentication error. Please restart the app."
             }
             return "API error occurred. Try again later."
         case .decodingFailed:
@@ -58,7 +60,7 @@ enum ClaudeAPIError: LocalizedError {
 }
 
 enum ClaudeAPIService {
-    private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+    private static let extractEndpoint = URL(string: "https://event-digest-worker.daniel-j-wilson-587.workers.dev/extract")!
 
     static func extractEvent(
         imageData: Data,
@@ -75,9 +77,6 @@ enum ClaudeAPIService {
         location: CLLocationCoordinate2D?,
         additionalContext: String? = nil
     ) async throws -> [EventDetails] {
-        let apiKey = APIKeyStorage.getAPIKey()
-        guard !apiKey.isEmpty else { throw ClaudeAPIError.noAPIKey }
-
         let base64Image = imageData.base64EncodedString()
 
         let locationContext: String
@@ -218,9 +217,6 @@ enum ClaudeAPIService {
         urlString: String,
         location: CLLocationCoordinate2D?
     ) async throws -> EventDetails {
-        let apiKey = APIKeyStorage.getAPIKey()
-        guard !apiKey.isEmpty else { throw ClaudeAPIError.noAPIKey }
-
         let locationContext: String
         if let loc = location {
             locationContext = """
@@ -285,9 +281,6 @@ enum ClaudeAPIService {
         sourceURL: String?,
         location: CLLocationCoordinate2D?
     ) async throws -> EventDetails {
-        let apiKey = APIKeyStorage.getAPIKey()
-        guard !apiKey.isEmpty else { throw ClaudeAPIError.noAPIKey }
-
         let locationContext: String
         if let loc = location {
             locationContext = """
@@ -404,19 +397,39 @@ enum ClaudeAPIService {
         }
     }
 
-    /// Sends the HTTP request and returns the raw text from Claude's response.
+    /// Sends the extraction request via the Worker proxy and returns raw text from Claude's response.
     private static func sendRequestRaw(_ requestBody: [String: Any]) async throws -> String {
-        let apiKey = APIKeyStorage.getAPIKey()
+        guard let token = await WorkerAuthService.accessToken() else {
+            SharedContainerService.writeDebugLog("API: auth failed — could not obtain JWT")
+            throw ClaudeAPIError.authFailed
+        }
 
-        var request = URLRequest(url: endpoint)
+        let bodyData = try JSONSerialization.data(withJSONObject: requestBody)
+        let (data, httpResponse) = try await executeExtractRequest(bodyData: bodyData, token: token)
+
+        // On 401, refresh the token once and retry
+        if httpResponse.statusCode == 401 {
+            SharedContainerService.writeDebugLog("API: 401 received, refreshing token and retrying")
+            WorkerAuthService.clearCachedToken()
+            guard let freshToken = await WorkerAuthService.accessToken() else {
+                throw ClaudeAPIError.authFailed
+            }
+            let (retryData, retryResponse) = try await executeExtractRequest(bodyData: bodyData, token: freshToken)
+            return try parseClaudeResponse(data: retryData, httpResponse: retryResponse)
+        }
+
+        return try parseClaudeResponse(data: data, httpResponse: httpResponse)
+    }
+
+    private static func executeExtractRequest(bodyData: Data, token: String) async throws -> (Data, HTTPURLResponse) {
+        var request = URLRequest(url: extractEndpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
-        request.timeoutInterval = 60
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = bodyData
+        request.timeoutInterval = 90
 
-        SharedContainerService.writeDebugLog("API: sending request (\(request.httpBody?.count ?? 0) bytes)")
+        SharedContainerService.writeDebugLog("API: sending extract request (\(bodyData.count) bytes)")
 
         let data: Data
         let response: URLResponse
@@ -431,6 +444,10 @@ enum ClaudeAPIService {
             throw ClaudeAPIError.invalidResponse
         }
 
+        return (data, httpResponse)
+    }
+
+    private static func parseClaudeResponse(data: Data, httpResponse: HTTPURLResponse) throws -> String {
         SharedContainerService.writeDebugLog("API: HTTP \(httpResponse.statusCode), response \(data.count) bytes")
 
         guard httpResponse.statusCode == 200 else {
@@ -440,8 +457,6 @@ enum ClaudeAPIService {
         }
 
         let claudeResponse = try JSONDecoder().decode(ClaudeResponse.self, from: data)
-        // With web_search + citations, Claude splits JSON across multiple text blocks.
-        // Concatenate all text blocks so extractJSON/extractJSONArray can find the full JSON.
         let allText = claudeResponse.content
             .filter { $0.type == "text" }
             .compactMap(\.text)

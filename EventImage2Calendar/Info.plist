@@ -30,7 +30,5 @@
 	<string>Helps identify the city/region for event details</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Select event poster photos from your library</string>
-	<key>CLAUDE_API_KEY</key>
-	<string>$(CLAUDE_API_KEY)</string>
 </dict>
 </plist>

@@ -6,10 +6,6 @@ options:
   xcodeVersion: "16.0"
   generateEmptyDirectories: true
 
-configFiles:
-  Debug: Secrets.xcconfig
-  Release: Secrets.xcconfig
-
 targets:
   EventImage2Calendar:
     type: application
@@ -32,7 +28,6 @@ targets:
         INFOPLIST_KEY_NSCameraUsageDescription: "Used to photograph event posters"
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Helps identify the city/region for event details"
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Select event poster photos from your library"
-        CLAUDE_API_KEY: $(CLAUDE_API_KEY)
     dependencies:
       - target: ShareExtension
     scheme:

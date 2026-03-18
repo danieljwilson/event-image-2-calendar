@@ -4,8 +4,10 @@ import { DeviceRecord, Env, EventPayload, StoredEventPayload } from './types';
 import {
   isFreshTimestamp,
   jsonError,
+  MAX_EXTRACT_BODY_CHARS,
   readJSONRequest,
   validateEventPayload,
+  validateExtractRequest,
   validateIssueTokenRequest,
   validateRegisterRequest,
 } from './validation';
@@ -21,6 +23,12 @@ const SENT_EVENT_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 const MAX_DEVICE_EVENTS_PER_HOUR = 120;
 const MAX_IP_EVENTS_PER_MINUTE = 30;
+
+const MAX_DEVICE_EXTRACTIONS_PER_HOUR = 50;
+const MAX_IP_EXTRACTIONS_PER_MINUTE = 10;
+
+const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
+const CLAUDE_API_VERSION = '2023-06-01';
 
 export interface PendingEventEntry {
   key: string;
@@ -40,8 +48,16 @@ export default {
       return handleIssueToken(request, env);
     }
 
+    if (request.method === 'POST' && url.pathname === '/extract') {
+      return handleExtract(request, env);
+    }
+
     if (request.method === 'POST' && url.pathname === '/events') {
       return handleEventPost(request, env);
+    }
+
+    if (request.method === 'DELETE' && url.pathname.startsWith('/events/')) {
+      return handleEventDelete(request, env, url.pathname);
     }
 
     if (request.method === 'GET' && url.pathname === '/health') {
@@ -159,6 +175,69 @@ async function handleIssueToken(request: Request, env: Env): Promise<Response> {
   );
 }
 
+async function handleExtract(request: Request, env: Env): Promise<Response> {
+  const claims = await authenticateEventRequest(request, env);
+  if (!claims) {
+    return jsonError(401, 'Unauthorized');
+  }
+
+  const deviceLimitOK = await enforceRateLimit(
+    env,
+    `extract:${claims.device_id}`,
+    MAX_DEVICE_EXTRACTIONS_PER_HOUR,
+    60 * 60
+  );
+  if (!deviceLimitOK) {
+    return jsonError(429, 'Extraction rate limit exceeded');
+  }
+
+  const ipAddress = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+  const ipLimitOK = await enforceRateLimit(env, `extractip:${ipAddress}`, MAX_IP_EXTRACTIONS_PER_MINUTE, 60);
+  if (!ipLimitOK) {
+    return jsonError(429, 'IP rate limit exceeded');
+  }
+
+  const parsed = await readJSONRequest(request, MAX_EXTRACT_BODY_CHARS);
+  if ('error' in parsed) return parsed.error;
+
+  const extractBody = validateExtractRequest(parsed.data);
+  if (!extractBody) {
+    return jsonError(400, 'Invalid extraction request');
+  }
+
+  const claudePayload: Record<string, unknown> = {
+    model: extractBody.model,
+    max_tokens: extractBody.max_tokens,
+    system: extractBody.system,
+    messages: extractBody.messages,
+  };
+  if (extractBody.tools) {
+    claudePayload.tools = extractBody.tools;
+  }
+
+  let claudeResponse: Response;
+  try {
+    claudeResponse = await fetch(CLAUDE_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'anthropic-version': CLAUDE_API_VERSION,
+        'x-api-key': env.CLAUDE_API_KEY,
+      },
+      body: JSON.stringify(claudePayload),
+    });
+  } catch {
+    return jsonError(502, 'Failed to reach extraction provider');
+  }
+
+  return new Response(claudeResponse.body, {
+    status: claudeResponse.status,
+    headers: {
+      'Content-Type': claudeResponse.headers.get('Content-Type') ?? 'application/json',
+    },
+  });
+}
+
 async function handleEventPost(request: Request, env: Env): Promise<Response> {
   const claims = await authenticateEventRequest(request, env);
   if (!claims) {
@@ -202,6 +281,26 @@ async function handleEventPost(request: Request, env: Env): Promise<Response> {
 
   return new Response(JSON.stringify({ success: true, key }), {
     status: 201,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+async function handleEventDelete(request: Request, env: Env, pathname: string): Promise<Response> {
+  const claims = await authenticateEventRequest(request, env);
+  if (!claims) {
+    return jsonError(401, 'Unauthorized');
+  }
+
+  const eventId = pathname.replace('/events/', '');
+  if (!eventId) {
+    return jsonError(400, 'Missing event ID');
+  }
+
+  const key = pendingEventKey(claims.device_id, eventId);
+  await env.EVENTS.delete(key);
+
+  return new Response(JSON.stringify({ success: true, key }), {
+    status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
 }
