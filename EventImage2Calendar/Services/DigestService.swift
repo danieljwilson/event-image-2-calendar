@@ -35,6 +35,20 @@ enum DigestService {
     }
 
     @MainActor
+    static func acceptEvent(
+        _ event: PersistedEvent,
+        googleCalendarURL: String?,
+        context: ModelContext
+    ) {
+        if let url = googleCalendarURL {
+            event.googleCalendarURL = url
+        }
+        event.status = .added
+        event.updatedAt = Date()
+        queueEvent(event, context: context)
+    }
+
+    @MainActor
     static func queueEvent(_ event: PersistedEvent, context: ModelContext) {
         guard UserDefaults.standard.bool(forKey: "digestEnabled") else { return }
         guard event.digestStatus == .notQueued else { return }

@@ -89,11 +89,17 @@ enum SharedContainerService {
 
     // MARK: - Debug log (written by extension, read by main app)
 
+    private static let maxLogBytes = 1_000_000 // 1 MB
+    private static let keepLogBytes = 500_000   // keep tail on rotation
+
     static func writeDebugLog(_ text: String) {
         guard let container = containerURL else { return }
         let logURL = container.appendingPathComponent("share_debug.log")
         let timestamp = ISO8601DateFormatter().string(from: Date())
         let entry = "[\(timestamp)] \(text)\n"
+
+        rotateLogIfNeeded(at: logURL)
+
         if let handle = try? FileHandle(forWritingTo: logURL) {
             handle.seekToEndOfFile()
             handle.write(entry.data(using: .utf8) ?? Data())
@@ -101,6 +107,16 @@ enum SharedContainerService {
         } else {
             try? entry.data(using: .utf8)?.write(to: logURL)
         }
+    }
+
+    private static func rotateLogIfNeeded(at logURL: URL) {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: logURL.path),
+              let size = attrs[.size] as? Int,
+              size > maxLogBytes else { return }
+
+        guard let data = try? Data(contentsOf: logURL) else { return }
+        let tail = data.suffix(keepLogBytes)
+        try? tail.write(to: logURL)
     }
 
     static func readDebugLog() -> String? {

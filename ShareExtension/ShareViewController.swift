@@ -97,20 +97,32 @@ class ShareViewController: UIViewController {
             SharedContainerService.writeDebugLog("Results: image=\(collectedImageData != nil), url=\(savedURL ?? "nil"), text=\(savedText != nil)")
             var didSave = false
             if let imageData = collectedImageData {
-                let _ = try? SharedContainerService.savePendingShare(
-                    imageData: imageData, sourceURL: savedURL, sourceText: savedText
-                )
-                didSave = true
+                do {
+                    _ = try SharedContainerService.savePendingShare(
+                        imageData: imageData, sourceURL: savedURL, sourceText: savedText
+                    )
+                    didSave = true
+                } catch {
+                    SharedContainerService.writeDebugLog("savePendingShare failed (image): \(error.localizedDescription)")
+                }
             } else if let url = savedURL {
-                let _ = try? SharedContainerService.savePendingShare(
-                    imageData: nil, sourceURL: url, sourceText: savedText
-                )
-                didSave = true
+                do {
+                    _ = try SharedContainerService.savePendingShare(
+                        imageData: nil, sourceURL: url, sourceText: savedText
+                    )
+                    didSave = true
+                } catch {
+                    SharedContainerService.writeDebugLog("savePendingShare failed (url): \(error.localizedDescription)")
+                }
             } else if let text = savedText {
-                let _ = try? SharedContainerService.savePendingShare(
-                    imageData: nil, sourceURL: nil, sourceText: text
-                )
-                didSave = true
+                do {
+                    _ = try SharedContainerService.savePendingShare(
+                        imageData: nil, sourceURL: nil, sourceText: text
+                    )
+                    didSave = true
+                } catch {
+                    SharedContainerService.writeDebugLog("savePendingShare failed (text): \(error.localizedDescription)")
+                }
             }
 
             // Notify main app via Darwin notification
@@ -164,7 +176,10 @@ class ShareViewController: UIViewController {
 
     private func loadURL(from provider: NSItemProvider) async -> URL? {
         await withCheckedContinuation { continuation in
-            provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { item, _ in
+            provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { item, error in
+                if let error {
+                    SharedContainerService.writeDebugLog("  loadURL error: \(error.localizedDescription)")
+                }
                 continuation.resume(returning: item as? URL)
             }
         }
@@ -172,7 +187,10 @@ class ShareViewController: UIViewController {
 
     private func loadText(from provider: NSItemProvider) async -> String? {
         await withCheckedContinuation { continuation in
-            provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) { item, _ in
+            provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) { item, error in
+                if let error {
+                    SharedContainerService.writeDebugLog("  loadText error: \(error.localizedDescription)")
+                }
                 continuation.resume(returning: item as? String)
             }
         }

@@ -83,7 +83,8 @@ EventImage2Calendar/                      # Main app target
 │   ├── LocationService.swift             # CLLocationManager wrapper
 │   ├── DigestService.swift               # Local digest outbox + POST /events flush/retry
 │   ├── WorkerAuthService.swift           # Device key registration + JWT retrieval
-│   └── WebSearchService.swift            # Google search URL helper for descriptions
+│   ├── WebSearchService.swift            # Google search URL helper for descriptions
+│   └── CrashReportingService.swift       # MetricKit subscriber — crash/hang/diagnostic reports
 ├── Views/
 │   ├── ContentView.swift                 # Root (hosts EventListView)
 │   ├── CameraView.swift                  # Camera sheet + ImagePicker
@@ -304,8 +305,10 @@ KV-backed counters (eventually consistent):
 - 30 events/IP/minute
 
 **Extraction (`/extract`):**
-- 50 extractions/device/hour
+- 20 extractions/device/day (free tier — `FREE_TIER_DAILY_EXTRACTIONS` in `index.ts`)
 - 10 extractions/IP/minute
+
+The daily device cap is the primary cost control knob. To adjust the free tier limit, change `FREE_TIER_DAILY_EXTRACTIONS` in `cloudflare-worker/src/index.ts`. For per-device paid tiers, store a `tier` field on the device record in KV and look it up in `handleExtract` instead of using the constant.
 
 **Deferred:** Durable Objects for atomic rate limiting and Cloudflare WAF rules on `/events` and `/extract`.
 
@@ -367,6 +370,18 @@ No secrets are shipped in the iOS app binary. The Claude API key is injected ser
 - KV rate limiting is eventually consistent, not strongly atomic
 - Digest queue is retryable and idempotent, but not fully atomic end-to-end
 - No centralized monitoring/alerting pipeline
+
+## Observability
+
+### Crash Reporting (iOS)
+
+`CrashReportingService` subscribes to `MXMetricManager` (MetricKit) at app startup. When iOS delivers diagnostic payloads on the next launch (crash reports, hang diagnostics, CPU/disk exceptions), the service writes each payload's JSON to `{App Group}/crash_reports/` with a timestamped filename, keeping at most 20 files.
+
+The share extension runs in a separate process and does not generate MetricKit payloads. Extension errors are captured via `SharedContainerService.writeDebugLog` (file-based, shared via App Groups).
+
+### Debug Log
+
+`SharedContainerService.writeDebugLog` appends to `share_debug.log` in the App Groups container. Both the main app and the share extension write to this log. Log rotation truncates to the last 500 KB when the file exceeds 1 MB.
 
 ## Testing & CI
 

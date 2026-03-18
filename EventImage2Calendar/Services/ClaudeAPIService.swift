@@ -28,6 +28,7 @@ enum ClaudeAPIError: LocalizedError {
         case .authFailed, .invalidResponse, .decodingFailed, .noEventFound:
             return false
         case .apiError(let message):
+            if message.contains("Daily extraction limit") { return false }
             if message.hasPrefix("Network error:") { return true }
             if message.contains("HTTP 5") { return true }
             if message.contains("HTTP 429") { return true }
@@ -43,6 +44,7 @@ enum ClaudeAPIError: LocalizedError {
         case .invalidResponse:
             return "Received an unexpected response. Try again."
         case .apiError(let message):
+            if message.contains("Daily extraction limit") { return "Daily limit reached. Upgrade for more extractions." }
             if message.hasPrefix("Network error:") { return "Network error. Will retry automatically." }
             if message.contains("HTTP 5") { return "Server error. Will retry automatically." }
             if message.contains("HTTP 429") { return "Too many requests. Will retry shortly." }

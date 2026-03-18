@@ -122,7 +122,7 @@ Priority: **High** — prerequisite for reliable daily use.
 - [ ] TestFlight beta cycle with external testers and bug triage
 - [ ] Minimal iOS automated tests for calendar formatting, event parsing, and persistence recovery
 - [ ] Basic UI smoke test for the happy-path extraction flow
-- [ ] Client crash reporting / telemetry for app and Share Extension failures
+- [x] Client crash reporting via MetricKit (`CrashReportingService`) + improved debug logging in Share Extension and BackgroundEventProcessor
 - [x] Graceful error handling for network failures and API errors
 - [x] Loading indicators during extraction
 - [x] Retry logic for transient failures (with backoff)
@@ -213,7 +213,7 @@ These are accepted trade-offs in the current architecture:
 | No hardware attestation | Scripted clients could register fake devices | Phase 2 |
 | KV rate limiting eventually consistent | Brief burst windows possible | Phase 2 |
 | No monitoring/alerting | Security events only visible in Worker console logs | Phase 4 |
-| No iOS crash reporting / client telemetry | App or Share Extension failures are hard to diagnose in production | Phase 1 |
+| ~~No iOS crash reporting / client telemetry~~ | ~~App or Share Extension failures are hard to diagnose in production~~ | ~~Phase 1~~ (resolved) |
 | Digest queue is idempotent and retryable but not fully atomic | A narrow duplicate-send window remains if email succeeds and archival fails before completion | Deferred infrastructure escalation |
 | Google Calendar via URL (no OAuth) | User must manually confirm event in browser | Acceptable trade-off |
 

@@ -25,7 +25,8 @@ EventImage2Calendar/                      # Main app target
 │   ├── BackgroundEventProcessor.swift    # Background API calls + SwiftData persistence
 │   ├── DigestService.swift               # POST events to Cloudflare Worker
 │   ├── WorkerAuthService.swift           # Device key registration + JWT retrieval
-│   └── WebSearchService.swift            # Google search URL helper for descriptions
+│   ├── WebSearchService.swift            # Google search URL helper for descriptions
+│   └── CrashReportingService.swift       # MetricKit subscriber — crash/hang/diagnostic reports
 ├── Views/
 │   ├── ContentView.swift                 # Root (hosts EventListView)
 │   ├── CameraView.swift                  # Camera sheet (modal) + ImagePicker
@@ -88,6 +89,7 @@ cd cloudflare-worker && npm install && wrangler deploy
 - **Modify extraction prompt**: Edit system/user prompts in `ClaudeAPIService.swift`
 - **Change digest schedule**: Edit `crons` in `cloudflare-worker/wrangler.toml`
 - **Change digest email template**: Edit `cloudflare-worker/src/email.ts`
+- **Change free tier daily extraction limit**: Edit `FREE_TIER_DAILY_EXTRACTIONS` in `cloudflare-worker/src/index.ts` (currently 20/day)
 
 ## Documentation Maintenance (REQUIRED)
 After every set of code changes, update the relevant docs before finishing:

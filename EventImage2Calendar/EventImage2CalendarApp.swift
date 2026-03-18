@@ -3,6 +3,8 @@ import SwiftData
 
 @main
 struct EventImage2CalendarApp: App {
+    private let crashReporting = CrashReportingService()
+
     init() {
         UserDefaults.standard.register(defaults: [
             "digestEnabled": true,

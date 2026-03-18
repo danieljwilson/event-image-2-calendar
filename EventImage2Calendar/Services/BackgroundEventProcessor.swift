@@ -271,7 +271,13 @@ class BackgroundEventProcessor {
         let descriptor = FetchDescriptor<PersistedEvent>(
             predicate: #Predicate { $0.statusRaw == "processing" }
         )
-        guard let events = try? context.fetch(descriptor) else { return }
+        let events: [PersistedEvent]
+        do {
+            events = try context.fetch(descriptor)
+        } catch {
+            SharedContainerService.writeDebugLog("recoverStuckEvents fetch error: \(error)")
+            return
+        }
         var changed = false
         for event in events where event.isStuckProcessing {
             event.status = .failed
@@ -287,7 +293,13 @@ class BackgroundEventProcessor {
         let descriptor = FetchDescriptor<PersistedEvent>(
             predicate: #Predicate { $0.statusRaw == "failed" }
         )
-        guard let events = try? context.fetch(descriptor) else { return }
+        let events: [PersistedEvent]
+        do {
+            events = try context.fetch(descriptor)
+        } catch {
+            SharedContainerService.writeDebugLog("autoRetryEligibleEvents fetch error: \(error)")
+            return
+        }
         for event in events where event.canRetry && event.hasRetryableError {
             retryEvent(event, context: context)
         }

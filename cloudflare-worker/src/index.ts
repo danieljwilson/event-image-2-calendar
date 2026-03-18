@@ -24,7 +24,8 @@ const SENT_EVENT_TTL_SECONDS = 60 * 60 * 24 * 7;
 const MAX_DEVICE_EVENTS_PER_HOUR = 120;
 const MAX_IP_EVENTS_PER_MINUTE = 30;
 
-const MAX_DEVICE_EXTRACTIONS_PER_HOUR = 50;
+// --- Extraction quotas (adjust these to change free/paid tier limits) ---
+const FREE_TIER_DAILY_EXTRACTIONS = 20;
 const MAX_IP_EXTRACTIONS_PER_MINUTE = 10;
 
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
@@ -181,14 +182,14 @@ async function handleExtract(request: Request, env: Env): Promise<Response> {
     return jsonError(401, 'Unauthorized');
   }
 
-  const deviceLimitOK = await enforceRateLimit(
+  const dailyLimitOK = await enforceRateLimit(
     env,
-    `extract:${claims.device_id}`,
-    MAX_DEVICE_EXTRACTIONS_PER_HOUR,
-    60 * 60
+    `extractdaily:${claims.device_id}`,
+    FREE_TIER_DAILY_EXTRACTIONS,
+    60 * 60 * 24
   );
-  if (!deviceLimitOK) {
-    return jsonError(429, 'Extraction rate limit exceeded');
+  if (!dailyLimitOK) {
+    return jsonError(429, 'Daily extraction limit reached');
   }
 
   const ipAddress = request.headers.get('CF-Connecting-IP') ?? 'unknown';

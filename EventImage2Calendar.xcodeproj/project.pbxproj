@@ -11,6 +11,7 @@
 		12888250B00F6F66E241D0DB /* PendingShare.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DC9667099F9CBFE96A393BD /* PendingShare.swift */; };
 		22646A1DBE47EE0DD26EAEAE /* ClaudeAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DEF75409CA59775C4F2036E /* ClaudeAPIService.swift */; };
 		520D5408C8C7DFD410693785 /* ImageResizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9AD03D4645BD49173A24521 /* ImageResizer.swift */; };
+		701A4B3E792F590823F10D2C /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 304D4DDDE8E3FE7667514426 /* PrivacyInfo.xcprivacy */; };
 		70253607BEFDE3683773D072 /* ImageResizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9AD03D4645BD49173A24521 /* ImageResizer.swift */; };
 		77E398B071CE3EB20EFC9A2E /* SharedContainerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BBCCC75ACB1440E535F72A5 /* SharedContainerService.swift */; };
 		82CEDAF0BED46A3128F31598 /* WorkerAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A257CC8D39444EBC2CAC132 /* WorkerAuthService.swift */; };
@@ -28,9 +29,9 @@
 		D67934AC6FBFBCE646D5575A /* WebSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50B2717B16D9874AB99C5802 /* WebSearchService.swift */; };
 		DFCB0856D8056026463A1E35 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AD0CC119BCD523E96882207F /* Assets.xcassets */; };
 		E6505817EFFCF0E8108BEA32 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8409A4F878058AA99F2AE56 /* ShareViewController.swift */; };
-		E95630FD44EE5D28CC9C0DF8 /* APIKeyStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CBBF8089B5659861DD5D23C /* APIKeyStorage.swift */; };
 		F186D2027BEE08C67D91913B /* PersistedEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C59582C88177834C6A565C0 /* PersistedEvent.swift */; };
 		F27609E426F4B3F98BEDEAC4 /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EE02BF75F9FAA86B49A4EE3 /* CameraView.swift */; };
+		FD11A5E23BC3422A21B56067 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93C18EAA9991D48B4E4552B1 /* SettingsView.swift */; };
 		FEB0A54D1C3BF136F04082DF /* LocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6E7042870212AB1B91CCACE /* LocationService.swift */; };
 /* End PBXBuildFile section */
 
@@ -62,9 +63,8 @@
 		0BBCCC75ACB1440E535F72A5 /* SharedContainerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedContainerService.swift; sourceTree = "<group>"; };
 		15C404C9C01D8C8FBFAF14C5 /* BackgroundEventProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundEventProcessor.swift; sourceTree = "<group>"; };
 		2A257CC8D39444EBC2CAC132 /* WorkerAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkerAuthService.swift; sourceTree = "<group>"; };
-		2BF7637C8DD086D7E12897FF /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
 		2C59582C88177834C6A565C0 /* PersistedEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedEvent.swift; sourceTree = "<group>"; };
-		4CBBF8089B5659861DD5D23C /* APIKeyStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIKeyStorage.swift; sourceTree = "<group>"; };
+		304D4DDDE8E3FE7667514426 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		4DCBEDA16EAC5215CF3960CB /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
 		4EE02BF75F9FAA86B49A4EE3 /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
 		50B2717B16D9874AB99C5802 /* WebSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchService.swift; sourceTree = "<group>"; };
@@ -74,6 +74,7 @@
 		6FC22F0BF4E23150FCF8B476 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		72EDF22FEC48489CD9BE9B29 /* EventListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventListView.swift; sourceTree = "<group>"; };
 		78896B1B8A1544FF317E5B05 /* EventRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventRowView.swift; sourceTree = "<group>"; };
+		93C18EAA9991D48B4E4552B1 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		9DC9667099F9CBFE96A393BD /* PendingShare.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingShare.swift; sourceTree = "<group>"; };
 		AD0CC119BCD523E96882207F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B1737822EE75936DA2812DD5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -93,7 +94,6 @@
 		0ABBF579C9A16CA926C6CC27 /* Utilities */ = {
 			isa = PBXGroup;
 			children = (
-				4CBBF8089B5659861DD5D23C /* APIKeyStorage.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -120,15 +120,6 @@
 				E8409A4F878058AA99F2AE56 /* ShareViewController.swift */,
 			);
 			path = ShareExtension;
-			sourceTree = "<group>";
-		};
-		4CCD442F980E2371FAD394D4 /* event-image-2-calendar */ = {
-			isa = PBXGroup;
-			children = (
-				2BF7637C8DD086D7E12897FF /* Secrets.xcconfig */,
-			);
-			name = "event-image-2-calendar";
-			path = .;
 			sourceTree = "<group>";
 		};
 		556D33E370C286B3604988B8 /* Shared */ = {
@@ -158,6 +149,7 @@
 				EB5E1A177DBD7AF4556A7124 /* EventDetailView.swift */,
 				72EDF22FEC48489CD9BE9B29 /* EventListView.swift */,
 				78896B1B8A1544FF317E5B05 /* EventRowView.swift */,
+				93C18EAA9991D48B4E4552B1 /* SettingsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -165,7 +157,6 @@
 		AF35BB7730C78E607516DE43 = {
 			isa = PBXGroup;
 			children = (
-				4CCD442F980E2371FAD394D4 /* event-image-2-calendar */,
 				EE47316274EF6DFF403587EF /* EventImage2Calendar */,
 				556D33E370C286B3604988B8 /* Shared */,
 				46696FAEB1F44E2862B51E5B /* ShareExtension */,
@@ -189,6 +180,7 @@
 				EBCDCF8F8F0CEDBE4AF65C6C /* EventImage2Calendar.entitlements */,
 				C91295771EE74F0660079909 /* EventImage2CalendarApp.swift */,
 				FBB53E87833EF43E941D4223 /* Info.plist */,
+				304D4DDDE8E3FE7667514426 /* PrivacyInfo.xcprivacy */,
 				CFABB8BD2A4F788D6F9466E9 /* Models */,
 				4314FE3F9F723340D3EC7154 /* Services */,
 				0ABBF579C9A16CA926C6CC27 /* Utilities */,
@@ -244,7 +236,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 1600;
+				LastUpgradeCheck = 2620;
 				TargetAttributes = {
 					4E1E02E74F9D134FB51223A5 = {
 						ProvisioningStyle = Automatic;
@@ -279,6 +271,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DFCB0856D8056026463A1E35 /* Assets.xcassets in Resources */,
+				701A4B3E792F590823F10D2C /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -300,7 +293,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				E95630FD44EE5D28CC9C0DF8 /* APIKeyStorage.swift in Sources */,
 				C2C923048EF690FC64AC7734 /* BackgroundEventProcessor.swift in Sources */,
 				96A54518FDF73B8D964EBFF0 /* CalendarService.swift in Sources */,
 				F27609E426F4B3F98BEDEAC4 /* CameraView.swift in Sources */,
@@ -316,6 +308,7 @@
 				FEB0A54D1C3BF136F04082DF /* LocationService.swift in Sources */,
 				B0628FD79C8B1E89DCD29772 /* PendingShare.swift in Sources */,
 				F186D2027BEE08C67D91913B /* PersistedEvent.swift in Sources */,
+				FD11A5E23BC3422A21B56067 /* SettingsView.swift in Sources */,
 				77E398B071CE3EB20EFC9A2E /* SharedContainerService.swift in Sources */,
 				D67934AC6FBFBCE646D5575A /* WebSearchService.swift in Sources */,
 				82CEDAF0BED46A3128F31598 /* WorkerAuthService.swift in Sources */,
@@ -335,7 +328,6 @@
 /* Begin XCBuildConfiguration section */
 		063E8CA56A78C59AC22ED993 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 2BF7637C8DD086D7E12897FF /* Secrets.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -369,8 +361,10 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = D5EUA44D5Y;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -391,6 +385,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -403,7 +398,6 @@
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = D5EUA44D5Y;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -424,7 +418,6 @@
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = D5EUA44D5Y;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -441,7 +434,6 @@
 		};
 		3CD03674A5D11A11595D3B51 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 2BF7637C8DD086D7E12897FF /* Secrets.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -475,8 +467,10 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = D5EUA44D5Y;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -490,6 +484,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
@@ -500,12 +495,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CLAUDE_API_KEY = "$(CLAUDE_API_KEY)";
 				CODE_SIGN_ENTITLEMENTS = EventImage2Calendar/EventImage2Calendar.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = D5EUA44D5Y;
 				INFOPLIST_FILE = EventImage2Calendar/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Used to photograph event posters";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Helps identify the city/region for event details";
@@ -526,12 +519,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CLAUDE_API_KEY = "$(CLAUDE_API_KEY)";
 				CODE_SIGN_ENTITLEMENTS = EventImage2Calendar/EventImage2Calendar.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = D5EUA44D5Y;
 				INFOPLIST_FILE = EventImage2Calendar/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Used to photograph event posters";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Helps identify the city/region for event details";

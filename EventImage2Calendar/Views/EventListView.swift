@@ -43,7 +43,6 @@ struct EventListView: View {
         let remaining = Array(processedEvents.dropFirst(3))
         guard !remaining.isEmpty else { return [] }
 
-        let calendar = Calendar.current
         let monthFormatter = DateFormatter()
         monthFormatter.dateFormat = "MMMM yyyy"
         let keyFormatter = DateFormatter()
