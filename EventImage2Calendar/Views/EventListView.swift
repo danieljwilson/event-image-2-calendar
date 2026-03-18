@@ -10,8 +10,7 @@ struct EventListView: View {
     @State private var showCamera = false
     @State private var hasAppeared = false
     @State private var showLibrary = false
-    @State private var showDebugLog = false
-    @State private var showSettings = false
+@State private var showSettings = false
     @State private var selectedTab: Tab = .pending
     @State private var correctionEvent: PersistedEvent?
     @State private var expandedMonths: Set<String> = []
@@ -96,39 +95,9 @@ struct EventListView: View {
                         Image(systemName: "gearshape")
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showDebugLog = true
-                    } label: {
-                        Image(systemName: "ladybug")
-                    }
-                }
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView()
-            }
-            .sheet(isPresented: $showDebugLog) {
-                NavigationStack {
-                    ScrollView {
-                        Text(SharedContainerService.readDebugLog() ?? "No debug log available")
-                            .font(.caption.monospaced())
-                            .padding()
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .navigationTitle("Share Debug Log")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button("Clear") {
-                                SharedContainerService.clearDebugLog()
-                                showDebugLog = false
-                            }
-                        }
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") { showDebugLog = false }
-                        }
-                    }
-                }
             }
             .fullScreenCover(isPresented: $showCamera) {
                 ZStack(alignment: .topLeading) {

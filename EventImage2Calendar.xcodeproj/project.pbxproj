@@ -3,13 +3,14 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 63;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		02D360FFAC8167AD075A3CD4 /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E9237DCCFDD3E9BA368F9213 /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		12888250B00F6F66E241D0DB /* PendingShare.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DC9667099F9CBFE96A393BD /* PendingShare.swift */; };
 		22646A1DBE47EE0DD26EAEAE /* ClaudeAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DEF75409CA59775C4F2036E /* ClaudeAPIService.swift */; };
+		4684972EB60BB9F5510D0D93 /* CrashReportingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34FA7DCFA68DC1BE1762AA95 /* CrashReportingService.swift */; };
 		520D5408C8C7DFD410693785 /* ImageResizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9AD03D4645BD49173A24521 /* ImageResizer.swift */; };
 		701A4B3E792F590823F10D2C /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 304D4DDDE8E3FE7667514426 /* PrivacyInfo.xcprivacy */; };
 		70253607BEFDE3683773D072 /* ImageResizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9AD03D4645BD49173A24521 /* ImageResizer.swift */; };
@@ -64,7 +65,8 @@
 		15C404C9C01D8C8FBFAF14C5 /* BackgroundEventProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundEventProcessor.swift; sourceTree = "<group>"; };
 		2A257CC8D39444EBC2CAC132 /* WorkerAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkerAuthService.swift; sourceTree = "<group>"; };
 		2C59582C88177834C6A565C0 /* PersistedEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedEvent.swift; sourceTree = "<group>"; };
-		304D4DDDE8E3FE7667514426 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		304D4DDDE8E3FE7667514426 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		34FA7DCFA68DC1BE1762AA95 /* CrashReportingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashReportingService.swift; sourceTree = "<group>"; };
 		4DCBEDA16EAC5215CF3960CB /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
 		4EE02BF75F9FAA86B49A4EE3 /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
 		50B2717B16D9874AB99C5802 /* WebSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchService.swift; sourceTree = "<group>"; };
@@ -81,9 +83,9 @@
 		B6E7042870212AB1B91CCACE /* LocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationService.swift; sourceTree = "<group>"; };
 		C91295771EE74F0660079909 /* EventImage2CalendarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventImage2CalendarApp.swift; sourceTree = "<group>"; };
 		D9AD03D4645BD49173A24521 /* ImageResizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageResizer.swift; sourceTree = "<group>"; };
-		E48C87871C77D84D139EA035 /* EventImage2Calendar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EventImage2Calendar.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E48C87871C77D84D139EA035 /* EventImage2Calendar.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = EventImage2Calendar.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E8409A4F878058AA99F2AE56 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
-		E9237DCCFDD3E9BA368F9213 /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		E9237DCCFDD3E9BA368F9213 /* ShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		E9E54C46DA5C0D60C9D0C6BE /* CalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarService.swift; sourceTree = "<group>"; };
 		EB5E1A177DBD7AF4556A7124 /* EventDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDetailView.swift; sourceTree = "<group>"; };
 		EBCDCF8F8F0CEDBE4AF65C6C /* EventImage2Calendar.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EventImage2Calendar.entitlements; sourceTree = "<group>"; };
@@ -104,6 +106,7 @@
 				15C404C9C01D8C8FBFAF14C5 /* BackgroundEventProcessor.swift */,
 				E9E54C46DA5C0D60C9D0C6BE /* CalendarService.swift */,
 				5DEF75409CA59775C4F2036E /* ClaudeAPIService.swift */,
+				34FA7DCFA68DC1BE1762AA95 /* CrashReportingService.swift */,
 				6BD95A8925138465FE04A8A0 /* DigestService.swift */,
 				B6E7042870212AB1B91CCACE /* LocationService.swift */,
 				50B2717B16D9874AB99C5802 /* WebSearchService.swift */,
@@ -236,12 +239,14 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 2620;
+				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					4E1E02E74F9D134FB51223A5 = {
+						DevelopmentTeam = RZ74J65XU2;
 						ProvisioningStyle = Automatic;
 					};
 					91AD7097968672B834BC5F94 = {
+						DevelopmentTeam = RZ74J65XU2;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -256,6 +261,7 @@
 			);
 			mainGroup = AF35BB7730C78E607516DE43;
 			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -298,6 +304,7 @@
 				F27609E426F4B3F98BEDEAC4 /* CameraView.swift in Sources */,
 				22646A1DBE47EE0DD26EAEAE /* ClaudeAPIService.swift in Sources */,
 				C1CE6F951C358EE97F1431E9 /* ContentView.swift in Sources */,
+				4684972EB60BB9F5510D0D93 /* CrashReportingService.swift in Sources */,
 				C7050496E3FC39AA9934B8B5 /* DigestService.swift in Sources */,
 				9AC27ED8A5DDC2D7C59B738F /* EventDetailView.swift in Sources */,
 				CCDDB43DF45B359BEA5AC107 /* EventDetails.swift in Sources */,
@@ -361,10 +368,8 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = D5EUA44D5Y;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -385,7 +390,6 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -398,6 +402,7 @@
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = RZ74J65XU2;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -418,6 +423,7 @@
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = RZ74J65XU2;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -467,10 +473,8 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = D5EUA44D5Y;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -484,7 +488,6 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
@@ -499,6 +502,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = RZ74J65XU2;
 				INFOPLIST_FILE = EventImage2Calendar/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Used to photograph event posters";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Helps identify the city/region for event details";
@@ -523,6 +527,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = RZ74J65XU2;
 				INFOPLIST_FILE = EventImage2Calendar/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Used to photograph event posters";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Helps identify the city/region for event details";

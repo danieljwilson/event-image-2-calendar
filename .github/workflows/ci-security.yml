@@ -39,9 +39,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Prepare Secrets Config
-        run: cp Secrets.example.xcconfig Secrets.xcconfig
-
       - name: Build iOS App
         run: |
           xcodebuild \
