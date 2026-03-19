@@ -24,6 +24,8 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Used to photograph event posters</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

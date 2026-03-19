@@ -36,6 +36,7 @@ Status of Event Snap features and the path to a production-ready App Store relea
 - [x] Separate date/time certainty: `date_confirmed` and `time_confirmed` flags preserve extracted partial info (e.g., time known but date uncertain)
 - [x] Focused DateCorrectionSheet that shows only the missing picker (date, time, or both) instead of full EventDetailView
 - [x] Consistency enforcement: all events from the same image share date certainty; day-of-week names explicitly excluded as confirmed dates
+- [x] Past event detection: events with dates in the past are flagged as failed with user-correctable date editing
 - [x] DateCorrectionSheet auto-syncs end date when start date changes, preserving extracted duration
 - [x] Processed events grouped: next 3 "Coming Up" prominently, remainder collapsed by month
 
@@ -47,13 +48,15 @@ Status of Event Snap features and the path to a production-ready App Store relea
 - [x] Cursor-paginated KV reads for digest assembly
 - [x] Batched HTML digest email via Resend
 - [x] Output sanitization (HTML escaping, URL allowlisting)
-- [x] Digest auto-queues on extraction success, dequeues when user adds/dismisses (reminder-based)
+- [x] Digest auto-queues on extraction success, dequeues on all add/dismiss/delete paths (reminder-based)
 - [x] Worker `DELETE /events/:id` endpoint for removing acted-on events from digest queue
 - [x] Local iOS digest outbox with queued/sending/sent/failed retry state
 - [x] Idempotent Worker `/events` writes keyed by device + event ID
 - [x] Per-chunk digest archival after each successful email send
 - [x] All-day event support in digest payload + email rendering
-- [x] Settings view with digest email opt-out and camera-on-launch preference
+- [x] Settings view with digest email opt-out, email address entry, and camera-on-launch preference
+- [x] Per-device digest email: `PUT /device/preferences` stores email on DeviceRecord, cron sends per-device
+- [x] Digest email entry in onboarding + settings with server sync via WorkerAuthService
 
 ### Infrastructure
 - [x] XcodeGen project generation
@@ -119,6 +122,8 @@ Priority: **High** — prerequisite for reliable daily use.
 - [ ] End-to-end device testing of Share Extension (images from Photos, URLs from Safari/Instagram)
 - [ ] End-to-end testing of multi-day event flow (single day selection + full range)
 - [ ] Manual QA matrix covering Photos, Camera, Safari, Instagram, Eventbrite, and plain-text shares
+- [x] Onboarding flow (7-page walkthrough: features, permissions with system prompts, digest email setup, final)
+- [x] TestFlight build uploaded + App Store Connect record created
 - [ ] TestFlight beta cycle with external testers and bug triage
 - [ ] Minimal iOS automated tests for calendar formatting, event parsing, and persistence recovery
 - [ ] Basic UI smoke test for the happy-path extraction flow
@@ -160,8 +165,8 @@ Priority: **Medium** — needed for multi-user production scale.
 - [ ] Worker validates Apple identity tokens via JWKS
 - [ ] User-bound access tokens (JWT includes `user_id`)
 - [ ] Events stored with `userId` metadata
-- [ ] Per-user digest preferences (opt-in/out, frequency)
-- [ ] Per-user digest recipient email instead of a single global `DIGEST_EMAIL_TO`
+- [ ] Per-user digest preferences (frequency customization — opt-in/out and email already implemented per-device)
+- [x] Per-device digest recipient email via `PUT /device/preferences` (replaces single global `DIGEST_EMAIL_TO`)
 - [ ] Privacy policy, support URL, and account metadata required for Sign in with Apple
 - [ ] Account deletion / data removal flow if user accounts ship publicly
 - [ ] Feature flag for gradual enforcement (`ENFORCE_USER_AUTH`)

@@ -19,8 +19,13 @@ export interface StoredEventPayload extends EventPayload {
 export interface DeviceRecord {
   deviceId: string;
   publicKey: string;
+  digestEmail?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DevicePreferencesRequest {
+  digestEmail: string | null;
 }
 
 export interface RegisterDeviceRequest {

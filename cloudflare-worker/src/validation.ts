@@ -1,4 +1,4 @@
-import { EventPayload, IssueTokenRequest, RegisterDeviceRequest } from './types';
+import { DevicePreferencesRequest, EventPayload, IssueTokenRequest, RegisterDeviceRequest } from './types';
 
 export const MAX_BODY_CHARS = 32768;
 export const MAX_EXTRACT_BODY_CHARS = 2 * 1024 * 1024; // 2 MB for base64 image payloads
@@ -155,6 +155,26 @@ export function validateExtractRequest(input: unknown): ExtractRequestBody | nul
   }
 
   return result;
+}
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function validateDevicePreferences(input: unknown): DevicePreferencesRequest | null {
+  if (!isRecord(input)) return null;
+
+  const digestEmail = input.digestEmail;
+  if (digestEmail === null) {
+    return { digestEmail: null };
+  }
+
+  const emailStr = asString(digestEmail);
+  if (!emailStr) return null;
+  const trimmed = emailStr.trim();
+  if (trimmed.length === 0) return { digestEmail: null };
+  if (trimmed.length > 320) return null;
+  if (!EMAIL_REGEX.test(trimmed)) return null;
+
+  return { digestEmail: trimmed };
 }
 
 export function isFreshTimestamp(timestamp: number, maxSkewSeconds = 300): boolean {

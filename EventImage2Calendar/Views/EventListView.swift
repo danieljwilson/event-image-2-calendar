@@ -10,7 +10,7 @@ struct EventListView: View {
     @State private var showCamera = false
     @State private var hasAppeared = false
     @State private var showLibrary = false
-@State private var showSettings = false
+    @State private var showSettings = false
     @State private var selectedTab: Tab = .pending
     @State private var correctionEvent: PersistedEvent?
     @State private var expandedMonths: Set<String> = []
@@ -259,6 +259,17 @@ struct EventListView: View {
                                 EventRowView(event: event)
                             }
                             .buttonStyle(.plain)
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    modelContext.delete(event)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                        } else if event.status == .failed && event.isPastEvent {
+                            NavigationLink(value: event.id) {
+                                EventRowView(event: event)
+                            }
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
                                     modelContext.delete(event)

@@ -110,7 +110,7 @@ struct EventDetailView: View {
                 .frame(minHeight: 80)
             }
 
-            if event.status == .failed && event.needsDateCorrection {
+            if event.status == .failed && (event.needsDateCorrection || event.isPastEvent) {
                 Section {
                     Button {
                         event.hasExplicitDate = true
@@ -122,7 +122,9 @@ struct EventDetailView: View {
                             for: event.toEventDetails()
                         )?.absoluteString
                     } label: {
-                        Label("Confirm \(event.hasExplicitDate ? "Time" : (event.hasExplicitTime ? "Date" : "Date & Time"))", systemImage: "checkmark.circle")
+                        let label = event.isPastEvent ? "Confirm Updated Date" :
+                            "Confirm \(event.hasExplicitDate ? "Time" : (event.hasExplicitTime ? "Date" : "Date & Time"))"
+                        Label(label, systemImage: "checkmark.circle")
                             .frame(maxWidth: .infinity)
                             .font(.headline)
                     }
@@ -132,6 +134,7 @@ struct EventDetailView: View {
                     .listRowBackground(Color.clear)
 
                     Button(role: .destructive) {
+                        DigestService.dequeueEvent(event, context: modelContext)
                         modelContext.delete(event)
                         dismiss()
                     } label: {
@@ -157,7 +160,7 @@ struct EventDetailView: View {
                     } label: {
                         Label(
                             eventCount > 1 ? "Add \(eventCount) Events to Google Calendar" :
-                                (event.status == .added ? "Open in Google Calendar Again" : "Add to Google Calendar"),
+                                (event.status == .added ? "Open in Google Calendar" : "Add to Google Calendar"),
                             systemImage: "calendar.badge.plus"
                         )
                         .frame(maxWidth: .infinity)
@@ -221,6 +224,7 @@ struct EventDetailView: View {
 
                 if event.status == .ready {
                     Button(role: .destructive) {
+                        DigestService.dequeueEvent(event, context: modelContext)
                         modelContext.delete(event)
                         dismiss()
                     } label: {

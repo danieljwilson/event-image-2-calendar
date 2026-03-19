@@ -92,13 +92,19 @@ struct EventDetailsDTO: Decodable {
             endDate: end,
             venue: venue ?? "",
             address: address ?? "",
-            eventDescription: description ?? "",
+            eventDescription: Self.stripCiteTags(description ?? ""),
             timezone: timezone,
             isAllDay: isMulti,
             eventDates: eventDates ?? [],
             hasExplicitDate: hasDate,
             hasExplicitTime: hasTime
         )
+    }
+
+    /// Strip `<cite>` and `</cite>` tags from Claude web search responses.
+    private static func stripCiteTags(_ text: String) -> String {
+        text.replacingOccurrences(of: #"<cite[^>]*>"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: "</cite>", with: "")
     }
 
     private func parseDate(_ string: String?, eventTimeZone: TimeZone?) -> Date? {

@@ -1,11 +1,13 @@
 import { buildDigestEmail } from './email';
 import { issueAccessToken, verifyAccessToken, verifyDeviceSignature } from './security';
 import { DeviceRecord, Env, EventPayload, StoredEventPayload } from './types';
+
 import {
   isFreshTimestamp,
   jsonError,
   MAX_EXTRACT_BODY_CHARS,
   readJSONRequest,
+  validateDevicePreferences,
   validateEventPayload,
   validateExtractRequest,
   validateIssueTokenRequest,
@@ -55,6 +57,10 @@ export default {
 
     if (request.method === 'POST' && url.pathname === '/events') {
       return handleEventPost(request, env);
+    }
+
+    if (request.method === 'PUT' && url.pathname === '/device/preferences') {
+      return handleDevicePreferences(request, env);
     }
 
     if (request.method === 'DELETE' && url.pathname.startsWith('/events/')) {
@@ -306,6 +312,50 @@ async function handleEventDelete(request: Request, env: Env, pathname: string): 
   });
 }
 
+async function handleDevicePreferences(request: Request, env: Env): Promise<Response> {
+  const claims = await authenticateEventRequest(request, env);
+  if (!claims) {
+    return jsonError(401, 'Unauthorized');
+  }
+
+  const parsed = await readJSONRequest(request);
+  if ('error' in parsed) return parsed.error;
+
+  const prefs = validateDevicePreferences(parsed.data);
+  if (!prefs) {
+    return jsonError(400, 'Invalid preferences payload');
+  }
+
+  const key = deviceKey(claims.device_id);
+  const existingRaw = await env.EVENTS.get(key);
+  if (!existingRaw) {
+    return jsonError(404, 'Device not registered');
+  }
+
+  let deviceRecord: DeviceRecord;
+  try {
+    deviceRecord = JSON.parse(existingRaw) as DeviceRecord;
+  } catch {
+    return jsonError(500, 'Invalid device record');
+  }
+
+  if (prefs.digestEmail === null) {
+    delete deviceRecord.digestEmail;
+  } else {
+    deviceRecord.digestEmail = prefs.digestEmail;
+  }
+  deviceRecord.updatedAt = new Date().toISOString();
+
+  await env.EVENTS.put(key, JSON.stringify(deviceRecord), {
+    expirationTtl: DEVICE_RECORD_TTL_SECONDS,
+  });
+
+  return new Response(JSON.stringify({ success: true }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 async function authenticateEventRequest(request: Request, env: Env) {
   const authHeader = request.headers.get('Authorization') ?? '';
   if (!authHeader.startsWith('Bearer ')) return null;
@@ -318,23 +368,52 @@ export async function sendDailyDigest(env: Env): Promise<void> {
   const pending = await listPendingEvents(env);
   if (pending.length === 0) return;
 
-  pending.sort((a, b) => Date.parse(a.event.startDate) - Date.parse(b.event.startDate));
+  // Group events by deviceId
+  const byDevice = new Map<string, PendingEventEntry[]>();
+  for (const entry of pending) {
+    // Extract deviceId from key: "pending:{deviceId}:{eventId}"
+    const parts = entry.key.split(':');
+    const deviceId = parts.length >= 3 ? parts[1] : 'unknown';
+    const list = byDevice.get(deviceId) ?? [];
+    list.push(entry);
+    byDevice.set(deviceId, list);
+  }
 
-  const chunkSize = 100;
-  const totalChunks = Math.ceil(pending.length / chunkSize);
-
-  for (let i = 0; i < totalChunks; i++) {
-    const chunk = pending.slice(i * chunkSize, (i + 1) * chunkSize);
-    const { subject, html } = buildDigestEmail(chunk.map((entry) => entry.event));
-    const chunkSubject = totalChunks > 1 ? `${subject} [${i + 1}/${totalChunks}]` : subject;
-
-    const sent = await sendDigestEmail(env, chunkSubject, html);
-    if (!sent) {
-      console.error('Digest email send failed at chunk', i + 1);
-      return;
+  for (const [deviceId, deviceEvents] of byDevice) {
+    // Look up device record for digest email
+    let recipientEmail = env.DIGEST_EMAIL_TO; // fallback
+    if (deviceId !== 'unknown') {
+      const deviceRaw = await env.EVENTS.get(deviceKey(deviceId));
+      if (deviceRaw) {
+        try {
+          const record = JSON.parse(deviceRaw) as DeviceRecord;
+          if (record.digestEmail) {
+            recipientEmail = record.digestEmail;
+          }
+        } catch {
+          // use fallback
+        }
+      }
     }
 
-    await archivePendingEntries(env, chunk);
+    deviceEvents.sort((a, b) => Date.parse(a.event.startDate) - Date.parse(b.event.startDate));
+
+    const chunkSize = 100;
+    const totalChunks = Math.ceil(deviceEvents.length / chunkSize);
+
+    for (let i = 0; i < totalChunks; i++) {
+      const chunk = deviceEvents.slice(i * chunkSize, (i + 1) * chunkSize);
+      const { subject, html } = buildDigestEmail(chunk.map((entry) => entry.event));
+      const chunkSubject = totalChunks > 1 ? `${subject} [${i + 1}/${totalChunks}]` : subject;
+
+      const sent = await sendDigestEmail(env, chunkSubject, html, recipientEmail);
+      if (!sent) {
+        console.error(`Digest email send failed for device ${deviceId} at chunk ${i + 1}`);
+        break;
+      }
+
+      await archivePendingEntries(env, chunk);
+    }
   }
 }
 
@@ -372,7 +451,8 @@ export async function listPendingEvents(env: Env): Promise<PendingEventEntry[]> 
   return entries;
 }
 
-async function sendDigestEmail(env: Env, subject: string, html: string): Promise<boolean> {
+async function sendDigestEmail(env: Env, subject: string, html: string, recipient?: string): Promise<boolean> {
+  const to = recipient ?? env.DIGEST_EMAIL_TO;
   const resendResponse = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -381,7 +461,7 @@ async function sendDigestEmail(env: Env, subject: string, html: string): Promise
     },
     body: JSON.stringify({
       from: env.DIGEST_EMAIL_FROM,
-      to: [env.DIGEST_EMAIL_TO],
+      to: [to],
       subject,
       html,
     }),

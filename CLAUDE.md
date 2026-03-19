@@ -24,15 +24,17 @@ EventImage2Calendar/                      # Main app target
 │   ├── CalendarService.swift             # Google Calendar URL + .ics generation
 │   ├── BackgroundEventProcessor.swift    # Background API calls + SwiftData persistence
 │   ├── DigestService.swift               # POST events to Cloudflare Worker
-│   ├── WorkerAuthService.swift           # Device key registration + JWT retrieval
+│   ├── WorkerAuthService.swift           # Device key registration + JWT retrieval + digest preferences
 │   ├── WebSearchService.swift            # Google search URL helper for descriptions
 │   └── CrashReportingService.swift       # MetricKit subscriber — crash/hang/diagnostic reports
 ├── Views/
-│   ├── ContentView.swift                 # Root (hosts EventListView)
+│   ├── ContentView.swift                 # Root (onboarding gate → EventListView)
+│   ├── OnboardingView.swift              # 7-page onboarding (features, permissions, digest email, final)
 │   ├── CameraView.swift                  # Camera sheet (modal) + ImagePicker
 │   ├── EventListView.swift               # Event queue with swipe actions + share consumption
 │   ├── EventRowView.swift                # Compact list row
-│   └── EventDetailView.swift             # Editable event form + calendar buttons + multi-day UI
+│   ├── EventDetailView.swift             # Editable event form + calendar buttons + multi-day UI
+│   └── SettingsView.swift                # User preferences (digest toggle + email, camera-on-launch)
 └── PrivacyInfo.xcprivacy                 # App privacy manifest
 
 ShareExtension/                           # Share Extension target

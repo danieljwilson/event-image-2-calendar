@@ -82,16 +82,17 @@ EventImage2Calendar/                      # Main app target
 │   ├── BackgroundEventProcessor.swift    # Background API calls + SwiftData persistence
 │   ├── LocationService.swift             # CLLocationManager wrapper
 │   ├── DigestService.swift               # Local digest outbox + POST /events flush/retry
-│   ├── WorkerAuthService.swift           # Device key registration + JWT retrieval
+│   ├── WorkerAuthService.swift           # Device key registration + JWT retrieval + digest preferences
 │   ├── WebSearchService.swift            # Google search URL helper for descriptions
 │   └── CrashReportingService.swift       # MetricKit subscriber — crash/hang/diagnostic reports
 ├── Views/
-│   ├── ContentView.swift                 # Root (hosts EventListView)
+│   ├── ContentView.swift                 # Root (onboarding gate → EventListView)
+│   ├── OnboardingView.swift              # 7-page onboarding (features, permissions, digest email, final)
 │   ├── CameraView.swift                  # Camera sheet + ImagePicker
 │   ├── EventListView.swift               # Event queue with swipe actions + DateCorrectionSheet + grouped processed list
 │   ├── EventRowView.swift                # Compact list row
 │   ├── EventDetailView.swift             # Editable form + calendar buttons
-│   └── SettingsView.swift                # User preferences (digest toggle, camera-on-launch)
+│   └── SettingsView.swift                # User preferences (digest toggle + email, camera-on-launch)
 └── PrivacyInfo.xcprivacy                 # App privacy manifest
 
 ShareExtension/                           # Share Extension target
@@ -171,9 +172,9 @@ Camera / Photo Library / Share Extension
 
 The digest sends reminders about events the user has **not yet acted on**:
 
-1. Extraction produces a local `PersistedEvent` in `.ready`
+1. Extraction produces a local `PersistedEvent` in `.ready` (past events are excluded — they get `.failed`)
 2. `DigestService.queueEvent` automatically queues it for digest (if enabled in Settings) and flushes to the Worker via `POST /events`
-3. If the user acts (swipes "Add" or "Dismiss"), `DigestService.dequeueEvent` removes the event from the digest queue and calls `DELETE /events/:id` to remove it from Worker KV
+3. If the user acts (swipes "Add", taps "Add to Google Calendar" in detail view, or dismisses/deletes), `DigestService.dequeueEvent` removes the event from the digest queue and calls `DELETE /events/:id` to remove it from Worker KV
 4. The daily cron emails only events still in `pending:*` — those the user hasn't dealt with
 
 The local outbox tracks `notQueued` → `queued` → `sending` → `sent` | `failed`. Users can disable digest emails entirely in the Settings view.
@@ -221,9 +222,11 @@ When a URL is shared (from Instagram, Safari, etc.), `BackgroundEventProcessor.e
 
 **Response schema:** `{ title, start_datetime, end_datetime, venue, address, description, timezone, is_multi_day, event_dates, date_confirmed, time_confirmed }`
 
-### Missing Date/Time Handling
+### Missing Date/Time & Past Event Handling
 
 Claude returns `date_confirmed` and `time_confirmed` booleans alongside `start_datetime` (which is always populated — using today's date as placeholder when the date is unknown, or `T00:00:00` when the time is unknown). `EventDetailsDTO.toEventDetails()` maps these to `hasExplicitDate` and `hasExplicitTime` on `EventDetails`. `PersistedEvent.applyExtraction()` sets the event to `.failed` with a field-specific message ("Please enter the date", "Please enter the time", or both) when either flag is false.
+
+**Past event detection:** After date/time validation, `applyExtraction()` checks whether the event's start date is in the past (`isPastStartDate`). If so, the event is set to `.failed` with the message "This event is in the past. Update the date and confirm if it will occur again." The user can edit the date in `EventDetailView` and tap "Confirm Updated Date" to transition to `.ready`. Past events are tappable in `EventListView` via `NavigationLink` for easy correction.
 
 The user sees a focused `DateCorrectionSheet` (presented from `EventListView`) that shows only the missing picker component(s) — date-only, time-only, or both. The sheet merges the user's correction with the already-extracted values (e.g., keeping the extracted time when only the date was missing) and transitions the event to `.ready`. Changing the start date automatically syncs the end date, preserving the originally extracted duration. A fallback confirmation button is also available in `EventDetailView` for events reached via navigation.
 
@@ -267,6 +270,7 @@ Description URLs are auto-linked as `<a href>` tags for Google Calendar renderin
 | `/extract` | POST | Bearer JWT | Proxy Claude extraction with server-side API key |
 | `/events` | POST | Bearer JWT | Accept event payload |
 | `/events/:id` | DELETE | Bearer JWT | Remove event from digest queue |
+| `/device/preferences` | PUT | Bearer JWT | Update device digest email |
 | `/health` | GET | None | Health check |
 
 ### Planned Routes
@@ -281,9 +285,9 @@ Description URLs are auto-linked as `<a href>` tags for Google Calendar renderin
 
 ### Scheduled Job
 
-Daily cron (8 AM) collects `pending:*` events from KV with cursor-based pagination, sorts by start date, sends HTML digest via Resend in batches of 100, and archives each successful chunk to `sent:*` immediately after that chunk is delivered.
+Daily cron (8 AM) collects `pending:*` events from KV with cursor-based pagination, groups by device ID, looks up each device's `digestEmail` from its `DeviceRecord`, sorts by start date, sends HTML digest via Resend in batches of 100 per device, and archives each successful chunk to `sent:*` immediately after that chunk is delivered.
 
-**Current vs. target recipient model:** today, digest delivery is configured to a single `DIGEST_EMAIL_TO`. The production target moves this to per-user recipients and preferences once user identity is added.
+**Recipient model:** Each device can store a `digestEmail` via `PUT /device/preferences`. The cron uses the per-device email when available, falling back to the global `DIGEST_EMAIL_TO` secret. Users configure their email during onboarding or in the Settings view.
 
 ### Digest Delivery Semantics
 

@@ -167,6 +167,17 @@ final class PersistedEvent {
         self.hasExplicitTime = true
     }
 
+    var isPastStartDate: Bool {
+        if isAllDay {
+            return startDate < Calendar.current.startOfDay(for: Date())
+        }
+        return startDate < Date()
+    }
+
+    var isPastEvent: Bool {
+        status == .failed && isPastStartDate
+    }
+
     var needsDateCorrection: Bool {
         !hasExplicitDate || !hasExplicitTime
     }
@@ -196,11 +207,14 @@ final class PersistedEvent {
         self.updatedAt = Date()
         self.googleCalendarURL = CalendarService.googleCalendarURL(for: details)?.absoluteString
 
-        if details.hasExplicitDate && details.hasExplicitTime {
-            self.status = .ready
-        } else {
+        if !details.hasExplicitDate || !details.hasExplicitTime {
             self.status = .failed
             self.errorMessage = missingFieldDescription
+        } else if isPastStartDate {
+            self.status = .failed
+            self.errorMessage = "This event is in the past. Update the date and confirm if it will occur again."
+        } else {
+            self.status = .ready
         }
     }
 

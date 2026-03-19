@@ -45,7 +45,7 @@ enum DigestService {
         }
         event.status = .added
         event.updatedAt = Date()
-        queueEvent(event, context: context)
+        dequeueEvent(event, context: context)
     }
 
     @MainActor

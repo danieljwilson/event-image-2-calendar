@@ -15,6 +15,7 @@
 		701A4B3E792F590823F10D2C /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 304D4DDDE8E3FE7667514426 /* PrivacyInfo.xcprivacy */; };
 		70253607BEFDE3683773D072 /* ImageResizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9AD03D4645BD49173A24521 /* ImageResizer.swift */; };
 		77E398B071CE3EB20EFC9A2E /* SharedContainerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BBCCC75ACB1440E535F72A5 /* SharedContainerService.swift */; };
+		7EC651143B4FC5C4EE6347F5 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55983EBE20BA27F54B30232A /* OnboardingView.swift */; };
 		82CEDAF0BED46A3128F31598 /* WorkerAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A257CC8D39444EBC2CAC132 /* WorkerAuthService.swift */; };
 		96A54518FDF73B8D964EBFF0 /* CalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E54C46DA5C0D60C9D0C6BE /* CalendarService.swift */; };
 		9AC27ED8A5DDC2D7C59B738F /* EventDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5E1A177DBD7AF4556A7124 /* EventDetailView.swift */; };
@@ -71,6 +72,7 @@
 		4EE02BF75F9FAA86B49A4EE3 /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
 		50B2717B16D9874AB99C5802 /* WebSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchService.swift; sourceTree = "<group>"; };
 		53DC8697EC591F40211E5660 /* EventDetails.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDetails.swift; sourceTree = "<group>"; };
+		55983EBE20BA27F54B30232A /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		5DEF75409CA59775C4F2036E /* ClaudeAPIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeAPIService.swift; sourceTree = "<group>"; };
 		6BD95A8925138465FE04A8A0 /* DigestService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DigestService.swift; sourceTree = "<group>"; };
 		6FC22F0BF4E23150FCF8B476 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -152,6 +154,7 @@
 				EB5E1A177DBD7AF4556A7124 /* EventDetailView.swift */,
 				72EDF22FEC48489CD9BE9B29 /* EventListView.swift */,
 				78896B1B8A1544FF317E5B05 /* EventRowView.swift */,
+				55983EBE20BA27F54B30232A /* OnboardingView.swift */,
 				93C18EAA9991D48B4E4552B1 /* SettingsView.swift */,
 			);
 			path = Views;
@@ -313,6 +316,7 @@
 				CDD5F4BCD789BE69DE17551E /* EventRowView.swift in Sources */,
 				520D5408C8C7DFD410693785 /* ImageResizer.swift in Sources */,
 				FEB0A54D1C3BF136F04082DF /* LocationService.swift in Sources */,
+				7EC651143B4FC5C4EE6347F5 /* OnboardingView.swift in Sources */,
 				B0628FD79C8B1E89DCD29772 /* PendingShare.swift in Sources */,
 				F186D2027BEE08C67D91913B /* PersistedEvent.swift in Sources */,
 				FD11A5E23BC3422A21B56067 /* SettingsView.swift in Sources */,

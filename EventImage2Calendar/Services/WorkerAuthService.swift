@@ -27,8 +27,43 @@ enum WorkerAuthService {
         let expiresAt: Int64
     }
 
+    private struct PreferencesRequest: Encodable {
+        let digestEmail: String?
+    }
+
     static func clearCachedToken() {
         Task { await tokenCache.clear() }
+    }
+
+    static func updateDigestEmail(_ email: String?) async -> Bool {
+        guard let token = await accessToken() else {
+            SharedContainerService.writeDebugLog("Worker prefs: no auth token")
+            return false
+        }
+
+        let endpoint = workerBaseURL.appendingPathComponent("device/preferences")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try? JSONEncoder().encode(PreferencesRequest(digestEmail: email))
+        request.timeoutInterval = 15
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                let body = String(data: data, encoding: .utf8) ?? ""
+                SharedContainerService.writeDebugLog("Worker prefs: HTTP \(status): \(String(body.prefix(200)))")
+                return false
+            }
+            SharedContainerService.writeDebugLog("Worker prefs: updated digest email")
+            return true
+        } catch {
+            SharedContainerService.writeDebugLog("Worker prefs: network error: \(error.localizedDescription)")
+            return false
+        }
     }
 
     static func accessToken() async -> String? {
@@ -38,7 +73,7 @@ enum WorkerAuthService {
 
         guard let privateKey = loadOrCreatePrivateKey() else { return nil }
         let deviceID = loadOrCreateDeviceID()
-        let publicKey = base64url(privateKey.publicKey.rawRepresentation)
+        let publicKey = base64url(privateKey.publicKey.x963Representation)
 
         let registerTimestamp = Int64(Date().timeIntervalSince1970)
         guard let registerSignature = sign(
