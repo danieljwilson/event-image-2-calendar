@@ -1,7 +1,7 @@
 import { DevicePreferencesRequest, EventPayload, IssueTokenRequest, RegisterDeviceRequest } from './types';
 
 export const MAX_BODY_CHARS = 32768;
-export const MAX_EXTRACT_BODY_CHARS = 2 * 1024 * 1024; // 2 MB for base64 image payloads
+export const MAX_EXTRACT_BODY_CHARS = 8 * 1024 * 1024; // 8 MB for base64 image payloads
 const MAX_EVENT_DESCRIPTION_LENGTH = 4000;
 const MAX_SHORT_TEXT_LENGTH = 200;
 const MAX_URL_LENGTH = 2048;

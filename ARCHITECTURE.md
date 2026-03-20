@@ -92,7 +92,7 @@ EventImage2Calendar/                      # Main app target
 │   ├── EventListView.swift               # Event queue with swipe actions + DateCorrectionSheet + grouped processed list
 │   ├── EventRowView.swift                # Compact list row
 │   ├── EventDetailView.swift             # Editable form + calendar buttons
-│   └── SettingsView.swift                # User preferences (digest toggle + email, camera-on-launch)
+│   └── SettingsView.swift                # User preferences (digest toggle + email, camera-on-launch, extraction language)
 └── PrivacyInfo.xcprivacy                 # App privacy manifest
 
 ShareExtension/                           # Share Extension target
@@ -160,11 +160,11 @@ Camera / Photo Library / Share Extension
 **Status values:** `processing` → `ready` → `added` | `dismissed` | `failed`
 
 **Error handling & retry:**
-- `ClaudeAPIError` classifies errors as retryable (network, 5xx, 429, 413) or permanent (auth, decoding, no-event-found)
+- `ClaudeAPIError` classifies errors as retryable (network, 5xx, 429, 413) or permanent (auth, decoding, no-event-found). Error messages are source-aware: "image" for pure photos, "link" for URL shares, "share" for mixed image+URL shares, "text" for text-only shares
 - `performExtraction` auto-retries retryable errors up to 3 times with exponential backoff (2s, 4s, 8s)
 - Manual retry available via swipe action or detail view button, capped at 5 total attempts (`PersistedEvent.maxRetryCount`)
 - On app launch: events stuck in `.processing` for >5 min are recovered to `.failed`; failed events with retryable errors are auto-retried
-- Image validation: JPEG compression checked for success and 5 MB size limit before API upload
+- Image validation: progressive JPEG compression (quality 0.7 → 0.5 → 0.3) with 1.5 MB size cap before API upload
 
 **Multi-day events:** When Claude detects a date range with no specific timed event, it returns `is_multi_day: true` with an `event_dates` array. The detail view offers two modes: "Select Days" (multi-select checklist — pick any combination of dates, each becomes a separate all-day calendar event) or "Full Event" (entire date range as one event). Multi-date selection creates multiple Google Calendar entries (opened with staggered delays) or a single ICS file containing multiple VEVENTs.
 
@@ -207,18 +207,26 @@ Three extraction modes in `ClaudeAPIService`:
 - **Text extraction** (`extractEventFromText`): Sends page text content + `web_search` tool (max 3 uses). Truncates input to 4000 chars.
 - **URL extraction** (`extractEventFromURL`): Sends bare URL + `web_search` tool (max 5 uses) — Claude searches the web to find and extract event details from the URL.
 
+All three methods accept a `language` parameter (default: "English") that controls the output language of the `description` field. Titles, venue names, and addresses are kept in their original language. The preference is stored in `UserDefaults` as `extractionLanguage` and configurable in Settings.
+
 **Web search response handling:** With web search enabled, Claude's response `content` array may contain `[text, server_tool_use, web_search_tool_result, text, ...]`. The parser concatenates all `text` blocks and extracts JSON from the result. The Worker passes the Claude response through unchanged, so all parsing remains on the iOS side.
 
 **Multi-event images:** When a poster/screenshot lists several events (e.g., a cultural weekend schedule with events at different venues), `extractEvents` returns one `EventDetails` per distinct event. `BackgroundEventProcessor` applies the first result to the original `PersistedEvent` and creates additional `PersistedEvent` rows for the rest.
 
 All use shared `sendRequestRaw()` for HTTP handling (90s timeout to accommodate web search via the Worker proxy). `sendRequest()` parses a single JSON object via `EventDetailsDTO`; `sendRequestMultiple()` tries JSON array first, falls back to single object. Network errors from `URLSession` are wrapped into `ClaudeAPIError.apiError` for consistent error classification. Empty extractions (all key fields nil) throw `ClaudeAPIError.noEventFound`.
 
+### Extraction Fallback (Image → URL)
+
+When a share includes both an image and a URL (e.g., Instagram, Facebook), the image is tried first. If image extraction fails with an extraction-level error (`.noEventFound`, `.decodingFailed`, `.invalidResponse`), the processor automatically falls back to URL-based extraction. Auth, network, and quota errors are **not** retried via fallback — they would fail on the URL path too. Debug logs record the original error and fallback path chosen.
+
 ### URL Share Extraction Pipeline
 
-When a URL is shared (from Instagram, Safari, etc.), `BackgroundEventProcessor.extractFromURL` uses a simple two-path approach:
+When a URL is shared (from Instagram, Safari, etc.), `BackgroundEventProcessor.extractFromURL` classifies the companion `sourceText`:
 
-1. **Source text available** (from share extension) → send to `extractEventFromText` with `web_search` tool
-2. **No source text** → send bare URL to `extractEventFromURL` with `web_search` tool (Claude fetches page content via web search)
+1. **Substantive text** (>50 chars after stripping URLs) → send to `extractEventFromText` with `web_search` tool
+2. **Non-substantive text** (short share boilerplate like "Check out this post") or no text → send bare URL to `extractEventFromURL` with `web_search` tool (Claude fetches page content via web search)
+
+The 50-char threshold is a heuristic; decisions are logged with original and stripped text lengths for tuning.
 
 **Response schema:** `{ title, start_datetime, end_datetime, venue, address, description, timezone, is_multi_day, event_dates, date_confirmed, time_confirmed }`
 
@@ -242,7 +250,7 @@ The following components can be independently swapped or upgraded:
 | **Web Search Tool** | `ClaudeAPIService.webSearchTool()` helper | `web_search_20250305` | Newer `web_search_20260209` adds dynamic filtering (`allowed_domains`, `blocked_domains`) but only works with Sonnet 4.6+ and Opus 4.6 (not Haiku 4.5). Upgrade requires changing the model too. |
 | **API Version Header** | `cloudflare-worker/src/index.ts` — `CLAUDE_API_VERSION` constant | `2023-06-01` | Set server-side in the Worker proxy. Must be compatible with the web search tool version in use. |
 | **User Location** | `ClaudeAPIService.webSearchTool()` — `user_location` parameter | Device timezone + country code | Provides localized web search results. Derived from `TimeZone.current` and `Locale.current.region`. Could be enhanced with reverse geocoding for city-level precision. |
-| **Image Compression** | `Shared/ImageResizer.swift` | 1024px max, JPEG 0.7 | Adjust for quality vs. API payload size trade-off. |
+| **Image Compression** | `Shared/ImageResizer.swift` | 1024px max, JPEG 0.7→0.5→0.3 progressive, 1.5 MB cap | Progressive quality reduction keeps images under the Worker body limit after base64 inflation. |
 | **Extraction Gateway** | `ClaudeAPIService.swift` → Worker `/extract` route → Claude | App → Worker → Claude | Worker proxy keeps provider secrets server-side and enforces rate limits centrally. |
 | **Digest Email Provider** | `cloudflare-worker/src/email.ts` | Resend | Any transactional email API (SendGrid, Mailgun, etc.) — swap the HTTP call in `sendDigestEmail()`. |
 
@@ -346,7 +354,7 @@ The production target uses separate `dev`, `staging`, and `production` Worker en
 
 - `application/json` content-type enforcement
 - Event payloads (`/events`): 32KB body limit, field-level validation (title 1-200, description 0-4000, venue/address 0-200, URL 0-2048), date parsing/ordering, timezone validation
-- Extraction payloads (`/extract`): 2MB body limit (for base64 images), model allowlist (`claude-haiku-4-5`), max_tokens cap (4096), required system prompt and messages
+- Extraction payloads (`/extract`): 8 MB body limit (for base64 images), model allowlist (`claude-haiku-4-5`), max_tokens cap (4096), required system prompt and messages
 - Timestamp freshness (5-minute skew tolerance)
 
 ### Output Sanitization

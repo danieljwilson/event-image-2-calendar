@@ -179,16 +179,20 @@ final class PersistedEvent {
     }
 
     var needsDateCorrection: Bool {
-        !hasExplicitDate || !hasExplicitTime
+        let needsTime = !hasExplicitTime && !isAllDay
+        return !hasExplicitDate || needsTime
     }
 
     var missingFieldDescription: String {
-        if !hasExplicitDate && !hasExplicitTime {
+        let needsTime = !hasExplicitTime && !isAllDay
+        if !hasExplicitDate && needsTime {
             return "Please enter the date and time."
         } else if !hasExplicitDate {
             return "Please enter the date."
-        } else {
+        } else if needsTime {
             return "Please enter the time."
+        } else {
+            return "Missing event details."
         }
     }
 
@@ -207,7 +211,10 @@ final class PersistedEvent {
         self.updatedAt = Date()
         self.googleCalendarURL = CalendarService.googleCalendarURL(for: details)?.absoluteString
 
-        if !details.hasExplicitDate || !details.hasExplicitTime {
+        let needsDate = !details.hasExplicitDate
+        let needsTime = !details.hasExplicitTime && !details.isAllDay
+
+        if needsDate || needsTime {
             self.status = .failed
             self.errorMessage = missingFieldDescription
         } else if isPastStartDate {

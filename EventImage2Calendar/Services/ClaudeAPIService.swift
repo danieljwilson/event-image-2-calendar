@@ -67,9 +67,10 @@ enum ClaudeAPIService {
     static func extractEvent(
         imageData: Data,
         location: CLLocationCoordinate2D?,
-        additionalContext: String? = nil
+        additionalContext: String? = nil,
+        language: String = "English"
     ) async throws -> EventDetails {
-        let events = try await extractEvents(imageData: imageData, location: location, additionalContext: additionalContext)
+        let events = try await extractEvents(imageData: imageData, location: location, additionalContext: additionalContext, language: language)
         guard let first = events.first else { throw ClaudeAPIError.noEventFound }
         return first
     }
@@ -77,7 +78,8 @@ enum ClaudeAPIService {
     static func extractEvents(
         imageData: Data,
         location: CLLocationCoordinate2D?,
-        additionalContext: String? = nil
+        additionalContext: String? = nil,
+        language: String = "English"
     ) async throws -> [EventDetails] {
         let base64Image = imageData.base64EncodedString()
 
@@ -164,6 +166,9 @@ enum ClaudeAPIService {
           "time_confirmed": true
         }
         Set null for unknown fields (except start_datetime). For is_multi_day events, list dates in event_dates array.
+
+        OUTPUT LANGUAGE: Write the "description" field in \(language). \
+        Keep the title, venue, and address in their original language as shown in the image.
         """
 
         let contextBlock: String
@@ -217,7 +222,8 @@ enum ClaudeAPIService {
 
     static func extractEventFromURL(
         urlString: String,
-        location: CLLocationCoordinate2D?
+        location: CLLocationCoordinate2D?,
+        language: String = "English"
     ) async throws -> EventDetails {
         let locationContext: String
         if let loc = location {
@@ -252,6 +258,9 @@ enum ClaudeAPIService {
           "event_dates": []
         }
         Set null for unknown fields. For is_multi_day events, list dates in event_dates array.
+
+        OUTPUT LANGUAGE: Write the "description" field in \(language). \
+        Keep the title, venue, and address in their original language.
         """
 
         let userText = """
@@ -281,7 +290,8 @@ enum ClaudeAPIService {
     static func extractEventFromText(
         text: String,
         sourceURL: String?,
-        location: CLLocationCoordinate2D?
+        location: CLLocationCoordinate2D?,
+        language: String = "English"
     ) async throws -> EventDetails {
         let locationContext: String
         if let loc = location {
@@ -316,6 +326,9 @@ enum ClaudeAPIService {
           "event_dates": []
         }
         Set null for unknown fields. For is_multi_day events, list dates in event_dates array.
+
+        OUTPUT LANGUAGE: Write the "description" field in \(language). \
+        Keep the title, venue, and address in their original language.
         """
 
         let truncatedText = String(text.prefix(4000))

@@ -27,6 +27,9 @@ Status of Event Snap features and the path to a production-ready App Store relea
 - [x] Multi-strategy page content fetching (desktop UA → Facebook crawler UA → Instagram embed)
 - [x] Text-based extraction from page content when no image available
 - [x] OG metadata extraction (image, title, description) with HTML body text fallback
+- [x] Image→URL extraction fallback for shares with poor preview images (Instagram, etc.)
+- [x] Substantive text filtering: skip non-content share text (short boilerplate, bare URLs) in URL extraction path
+- [x] Source-aware error messages (image/link/share/text) based on available extraction sources
 
 ### Extraction Quality
 - [x] Claude native web search tool (`web_search_20250305`) for verifying/completing event details in a single API call
@@ -37,6 +40,7 @@ Status of Event Snap features and the path to a production-ready App Store relea
 - [x] Focused DateCorrectionSheet that shows only the missing picker (date, time, or both) instead of full EventDetailView
 - [x] Consistency enforcement: all events from the same image share date certainty; day-of-week names explicitly excluded as confirmed dates
 - [x] Past event detection: events with dates in the past are flagged as failed with user-correctable date editing
+- [x] User-configurable extraction language: description field output in chosen language (default English), titles/venues kept in original language
 - [x] DateCorrectionSheet auto-syncs end date when start date changes, preserving extracted duration
 - [x] Processed events grouped: next 3 "Coming Up" prominently, remainder collapsed by month
 
@@ -131,7 +135,8 @@ Priority: **High** — prerequisite for reliable daily use.
 - [x] Graceful error handling for network failures and API errors
 - [x] Loading indicators during extraction
 - [x] Retry logic for transient failures (with backoff)
-- [x] Edge cases: very large images, unsupported formats, posters with no event info
+- [x] Edge cases: very large images (progressive JPEG quality reduction), unsupported formats, posters with no event info
+- [x] Multi-day all-day events skip time confirmation and go directly to ready status
 - [x] Multi-event image extraction (single image → multiple PersistedEvents)
 
 ## Phase 2: Security Hardening

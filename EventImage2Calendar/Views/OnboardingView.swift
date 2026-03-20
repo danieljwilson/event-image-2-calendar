@@ -3,36 +3,36 @@ import AVFoundation
 import CoreLocation
 
 private struct OnboardingPageData {
-    let symbol: String
+    let imageName: String
     let title: String
     let description: String
-    let color: Color
+    let imageMaxHeight: CGFloat
 }
 
 private let featurePages: [OnboardingPageData] = [
     OnboardingPageData(
-        symbol: "camera.viewfinder",
+        imageName: "Onboarding/OnboardingSnapPoster",
         title: "Snap a Poster",
         description: "See a poster for an interesting event? Just take a photo.",
-        color: .blue
+        imageMaxHeight: 280
     ),
     OnboardingPageData(
-        symbol: "sparkles",
-        title: "Event Snap Does the Rest",
+        imageName: "Onboarding/OnboardingExtraction",
+        title: "AI Magic!",
         description: "Date, time, venue, and description are automatically extracted \u{2014} no typing needed.",
-        color: .purple
+        imageMaxHeight: 260
     ),
     OnboardingPageData(
-        symbol: "calendar.badge.plus",
-        title: "One Click to Add to Calendar",
+        imageName: "Onboarding/OnboardingAddCalendar",
+        title: "One Tap Add",
         description: "Check the details, make any edits, then tap \u{2018}Add to Google Calendar\u{2019}.",
-        color: .orange
+        imageMaxHeight: 280
     ),
     OnboardingPageData(
-        symbol: "square.and.arrow.up",
+        imageName: "Onboarding/OnboardingShare",
         title: "Share From Anywhere",
-        description: "See something interesting on Instagram/Facebook or on the web? Use the Share button to send event images straight to the app.",
-        color: .green
+        description: "See something interesting on Instagram/Facebook or on the web?\nUse the Share button to send event images straight to the app.",
+        imageMaxHeight: 320
     ),
 ]
 
@@ -100,20 +100,25 @@ struct OnboardingView: View {
 
 private struct OnboardingFeaturePage: View {
     let data: OnboardingPageData
-    @State private var appeared = false
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 16) {
             Spacer()
-
-            Image(systemName: data.symbol)
-                .font(.system(size: 80))
-                .foregroundStyle(data.color)
-                .symbolEffect(.bounce, value: appeared)
+                .frame(height: 60)
 
             Text(data.title)
-                .font(.title.bold())
+                .font(.title)
+                .fontWeight(.light)
                 .multilineTextAlignment(.center)
+
+            Spacer()
+                .frame(height: 8)
+
+            Image(data.imageName)
+                .resizable()
+                .scaledToFit()
+                .frame(maxHeight: data.imageMaxHeight)
+                .padding(.horizontal, 32)
 
             Text(data.description)
                 .font(.body)
@@ -126,56 +131,61 @@ private struct OnboardingFeaturePage: View {
                 .frame(height: 40)
         }
         .padding()
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                appeared = true
-            }
-        }
     }
 }
 
 // MARK: - Permissions Page
 
 private struct PermissionsPage: View {
-    @State private var appeared = false
     @State private var cameraGranted = false
     @State private var locationGranted = false
     @StateObject private var locationDelegate = OnboardingLocationDelegate()
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 16) {
             Spacer()
-
-            Image(systemName: "lock.shield")
-                .font(.system(size: 80))
-                .foregroundStyle(.teal)
-                .symbolEffect(.bounce, value: appeared)
+                .frame(height: 60)
 
             Text("Permissions")
-                .font(.title.bold())
+                .font(.title)
+                .fontWeight(.light)
                 .multilineTextAlignment(.center)
 
-            Text("Event Snap needs a few permissions to work. You can change these anytime in Settings.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+            Spacer()
+                .frame(height: 8)
+
+            Image("Onboarding/OnboardingPermissionsShield")
+                .resizable()
+                .scaledToFit()
+                .frame(maxHeight: 140)
+
+            VStack(spacing: 4) {
+                Text("We need a few permissions to work.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Text("You can change these anytime in Settings.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 32)
 
             VStack(alignment: .leading, spacing: 16) {
                 permissionRow(
-                    symbol: "camera.fill",
+                    imageName: "Onboarding/OnboardingPermissionsCamera",
                     title: "Camera",
                     detail: "Photograph event posters",
                     granted: cameraGranted
                 )
                 permissionRow(
-                    symbol: "photo.on.rectangle",
+                    imageName: "Onboarding/OnboardingPermissionsPhotos",
                     title: "Photo Library",
                     detail: "Select poster photos you\u{2019}ve already taken",
                     granted: nil
                 )
                 permissionRow(
-                    symbol: "location.fill",
+                    imageName: "Onboarding/OnboardingPermissionsLocation",
                     title: "Location",
                     detail: "City-level only \u{2014} improves extraction accuracy",
                     granted: locationGranted
@@ -190,6 +200,7 @@ private struct PermissionsPage: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .tint(.black)
             .controlSize(.large)
             .padding(.horizontal, 40)
 
@@ -198,19 +209,16 @@ private struct PermissionsPage: View {
         }
         .padding()
         .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                appeared = true
-            }
             checkCurrentStatus()
         }
     }
 
-    private func permissionRow(symbol: String, title: String, detail: String, granted: Bool?) -> some View {
+    private func permissionRow(imageName: String, title: String, detail: String, granted: Bool?) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.title3)
-                .foregroundStyle(.teal)
-                .frame(width: 28)
+            Image(imageName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 28, height: 28)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -272,27 +280,39 @@ private class OnboardingLocationDelegate: NSObject, ObservableObject, CLLocation
 private struct DigestSetupPage: View {
     @Binding var digestEnabled: Bool
     @Binding var digestEmail: String
-    @State private var appeared = false
     @FocusState private var emailFocused: Bool
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 16) {
             Spacer()
-
-            Image(systemName: "envelope.badge")
-                .font(.system(size: 80))
-                .foregroundStyle(.indigo)
-                .symbolEffect(.bounce, value: appeared)
+                .frame(height: 60)
 
             Text("Daily Digest")
-                .font(.title.bold())
+                .font(.title)
+                .fontWeight(.light)
                 .multilineTextAlignment(.center)
 
-            Text("Get a daily email with events you haven\u{2019}t added to your calendar yet. One click to add from the email.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+            Spacer()
+                .frame(height: 24)
+
+            Image("Onboarding/OnboardingDigestEmail")
+                .resizable()
+                .scaledToFit()
+                .frame(maxHeight: 160)
+
+            VStack(spacing: 4) {
+                Text("Get a daily email with events you haven\u{2019}t added to your calendar yet.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Text("One click to add from the email.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 32)
+
+            Spacer(minLength: 12)
 
             VStack(spacing: 12) {
                 TextField("Email address", text: $digestEmail)
@@ -316,11 +336,6 @@ private struct DigestSetupPage: View {
                 .frame(height: 40)
         }
         .padding()
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                appeared = true
-            }
-        }
     }
 }
 
@@ -328,26 +343,35 @@ private struct DigestSetupPage: View {
 
 private struct FinalPage: View {
     let onGetStarted: () -> Void
-    @State private var appeared = false
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 16) {
             Spacer()
+                .frame(height: 60)
 
-            Image(systemName: "party.popper")
-                .font(.system(size: 80))
-                .foregroundStyle(.blue)
-                .symbolEffect(.bounce, value: appeared)
-
-            Text("You\u{2019}re All Set")
-                .font(.title.bold())
+            Text("All Set")
+                .font(.title)
+                .fontWeight(.light)
                 .multilineTextAlignment(.center)
 
-            Text("Never miss an event again. Or do. But at least it will be on purpose.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+            Spacer()
+                .frame(height: 8)
+
+            Image("Onboarding/OnboardingAllSet")
+                .resizable()
+                .scaledToFit()
+                .frame(maxHeight: 280)
                 .padding(.horizontal, 32)
+
+            VStack(spacing: 4) {
+                Text("Never miss an event again.")
+                Text("Or do.")
+                Text("But at least it will be on purpose.")
+            }
+            .font(.body)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 32)
 
             Spacer()
 
@@ -358,6 +382,7 @@ private struct FinalPage: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .tint(.black)
             .controlSize(.large)
             .padding(.horizontal, 40)
 
@@ -365,10 +390,5 @@ private struct FinalPage: View {
                 .frame(height: 40)
         }
         .padding()
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                appeared = true
-            }
-        }
     }
 }

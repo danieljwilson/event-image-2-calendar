@@ -4,6 +4,12 @@ struct SettingsView: View {
     @AppStorage("digestEnabled") private var digestEnabled = true
     @AppStorage("digestEmail") private var digestEmail = ""
     @AppStorage("openCameraOnLaunch") private var openCameraOnLaunch = true
+    @AppStorage("extractionLanguage") private var extractionLanguage = "English"
+
+    private let languageOptions = [
+        "English", "French", "German", "Italian", "Spanish",
+        "Portuguese", "Dutch", "Japanese", "Korean", "Chinese"
+    ]
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
     @Environment(\.dismiss) private var dismiss
     @State private var emailDraft = ""
@@ -51,6 +57,19 @@ struct SettingsView: View {
                     Toggle("Open camera on launch", isOn: $openCameraOnLaunch)
                 } header: {
                     Text("Camera")
+                }
+
+                Section {
+                    Picker("Description language", selection: $extractionLanguage) {
+                        ForEach(languageOptions, id: \.self) { language in
+                            Text(language).tag(language)
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+                } header: {
+                    Text("Extraction")
+                } footer: {
+                    Text("Language for event descriptions. Titles and venue names are kept in their original language.")
                 }
 
                 Section("About") {

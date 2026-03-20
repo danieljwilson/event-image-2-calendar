@@ -409,7 +409,7 @@ private struct DateCorrectionSheet: View {
     @State private var endDate: Date = Date()
 
     private var needsDate: Bool { !event.hasExplicitDate }
-    private var needsTime: Bool { !event.hasExplicitTime }
+    private var needsTime: Bool { !event.hasExplicitTime && !event.isAllDay }
 
     private var pickerComponents: DatePickerComponents {
         if needsDate && needsTime { return [.date, .hourAndMinute] }

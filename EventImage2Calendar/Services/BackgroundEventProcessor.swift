@@ -128,6 +128,7 @@ class BackgroundEventProcessor {
         taskName: String
     ) {
         let location = locationService.currentLocation
+        let language = UserDefaults.standard.string(forKey: "extractionLanguage") ?? "English"
 
         var bgTaskID: UIBackgroundTaskIdentifier = .invalid
         bgTaskID = UIApplication.shared.beginBackgroundTask(withName: taskName) {
@@ -148,25 +149,25 @@ class BackgroundEventProcessor {
                         SharedContainerService.writeDebugLog("Extraction: image path (\(imageData.count) bytes)")
                         do {
                             allDetails = try await ClaudeAPIService.extractEvents(
-                                imageData: imageData, location: location
+                                imageData: imageData, location: location, language: language
                             )
-                        } catch ClaudeAPIError.noEventFound where sourceURL != nil {
-                            SharedContainerService.writeDebugLog("Extraction: image found nothing, trying page content from \(sourceURL!)")
+                        } catch let imageError where sourceURL != nil && Self.shouldFallbackToURL(imageError) {
+                            SharedContainerService.writeDebugLog("Extraction: image failed (\(imageError)), falling back to URL extraction from \(sourceURL!)")
                             let details = try await Self.extractFromURL(
-                                sourceURL!, sourceText: sourceText, location: location
+                                sourceURL!, sourceText: sourceText, location: location, language: language
                             )
                             allDetails = [details]
                         }
                     } else if let sourceURL {
                         SharedContainerService.writeDebugLog("Extraction: URL path for \(sourceURL)")
                         let details = try await Self.extractFromURL(
-                            sourceURL, sourceText: sourceText, location: location
+                            sourceURL, sourceText: sourceText, location: location, language: language
                         )
                         allDetails = [details]
                     } else if let sourceText, !sourceText.isEmpty {
                         SharedContainerService.writeDebugLog("Extraction: text-only path (\(sourceText.count) chars)")
                         let details = try await ClaudeAPIService.extractEventFromText(
-                            text: sourceText, sourceURL: nil, location: location
+                            text: sourceText, sourceURL: nil, location: location, language: language
                         )
                         allDetails = [details]
                     } else {
@@ -222,12 +223,18 @@ class BackgroundEventProcessor {
                 }
             }
 
-            let errorMessage: String
+            let baseMessage: String
             if let claudeError = lastError as? ClaudeAPIError {
-                errorMessage = claudeError.userFacingMessage
+                baseMessage = claudeError.userFacingMessage
             } else {
-                errorMessage = lastError?.localizedDescription ?? "Unknown error"
+                baseMessage = lastError?.localizedDescription ?? "Unknown error"
             }
+            let errorMessage = Self.sourceAwareErrorMessage(
+                baseMessage: baseMessage,
+                imageData: imageData,
+                sourceURL: sourceURL,
+                sourceText: sourceText
+            )
 
             SharedContainerService.writeDebugLog("Extraction failed after retries: \(errorMessage)")
 
@@ -316,26 +323,87 @@ class BackgroundEventProcessor {
         }
     }
 
+    /// Whether an image extraction error should trigger fallback to URL extraction.
+    /// Only extraction-level failures (content not parseable) warrant fallback.
+    /// Auth, network, quota, and server errors do not — they'd fail on the URL path too.
+    private static func shouldFallbackToURL(_ error: Error) -> Bool {
+        guard let claudeError = error as? ClaudeAPIError else { return false }
+        switch claudeError {
+        case .noEventFound, .decodingFailed, .invalidResponse:
+            return true
+        case .authFailed, .apiError:
+            return false
+        }
+    }
+
+    /// Source-aware error message for extraction failures.
+    private static func sourceAwareErrorMessage(
+        baseMessage: String,
+        imageData: Data?,
+        sourceURL: String?,
+        sourceText: String?
+    ) -> String {
+        // Only override decode/noEvent messages — pass through network/auth/quota messages unchanged
+        let isExtractionFailure = baseMessage.contains("Could not read event details")
+            || baseMessage.contains("No event details found")
+        guard isExtractionFailure else { return baseMessage }
+
+        if imageData != nil && sourceURL != nil {
+            return "Could not read event details from this share."
+        } else if imageData != nil {
+            return baseMessage // pure image — keep original "image" wording
+        } else if sourceURL != nil {
+            return "Could not read event details from this link."
+        } else if sourceText != nil {
+            return "Could not read event details from this text."
+        }
+        return baseMessage
+    }
+
     // MARK: - URL extraction (Claude uses web search to fetch and extract)
+
+    /// Minimum character count for sourceText (after URL stripping) to be treated as page content.
+    private static let substantiveTextThreshold = 50
 
     /// Send URL to Claude with web search — it handles page fetching internally.
     private static func extractFromURL(
         _ urlString: String,
         sourceText: String?,
-        location: CLLocationCoordinate2D?
+        location: CLLocationCoordinate2D?,
+        language: String = "English"
     ) async throws -> EventDetails {
-        // If we have sourceText from the share extension, try text extraction first
+        // Check if sourceText is substantive (not just a URL or short share boilerplate)
         if let sourceText, !sourceText.isEmpty {
-            SharedContainerService.writeDebugLog("Extraction: text path with source URL (\(sourceText.count) chars)")
-            return try await ClaudeAPIService.extractEventFromText(
-                text: sourceText, sourceURL: urlString, location: location
+            let strippedText = Self.stripURLs(from: sourceText).trimmingCharacters(in: .whitespacesAndNewlines)
+            SharedContainerService.writeDebugLog(
+                "Extraction: sourceText \(sourceText.count) chars, stripped \(strippedText.count) chars"
             )
+
+            if strippedText.count >= substantiveTextThreshold {
+                SharedContainerService.writeDebugLog("Extraction: text path with source URL (substantive text)")
+                return try await ClaudeAPIService.extractEventFromText(
+                    text: sourceText, sourceURL: urlString, location: location, language: language
+                )
+            } else {
+                SharedContainerService.writeDebugLog(
+                    "Extraction: skipping text path — stripped text below \(substantiveTextThreshold) char threshold"
+                )
+            }
         }
 
         // Let Claude web-search the URL directly
         SharedContainerService.writeDebugLog("Extraction: URL path with web search for \(urlString.prefix(80))")
         return try await ClaudeAPIService.extractEventFromURL(
-            urlString: urlString, location: location
+            urlString: urlString, location: location, language: language
         )
+    }
+
+    /// Strip URLs from text to check if the remainder is substantive content.
+    private static func stripURLs(from text: String) -> String {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+            return text
+        }
+        let range = NSRange(text.startIndex..., in: text)
+        return detector.stringByReplacingMatches(in: text, range: range, withTemplate: "")
     }
 }

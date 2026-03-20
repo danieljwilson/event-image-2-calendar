@@ -32,13 +32,14 @@ enum ImageResizeError: LocalizedError {
             return "Could not compress the image."
         case .tooLarge(let bytes):
             let mb = Double(bytes) / 1_000_000
-            return String(format: "Image too large (%.1f MB). Maximum is 5 MB.", mb)
+            return String(format: "Image too large (%.1f MB). Maximum is 1.5 MB.", mb)
         }
     }
 }
 
 extension UIImage {
-    static let maxImageBytes = 5_000_000
+    static let maxImageBytes = 1_500_000
+    private static let qualitySteps: [CGFloat] = [0.7, 0.5, 0.3]
 
     func resizedForAPI(maxDimension: CGFloat = 1024) -> Data? {
         let scale = min(maxDimension / size.width, maxDimension / size.height, 1.0)
@@ -48,7 +49,15 @@ extension UIImage {
         let resized = renderer.image { _ in
             draw(in: CGRect(origin: .zero, size: newSize))
         }
-        return resized.jpegData(compressionQuality: 0.7)
+
+        for quality in Self.qualitySteps {
+            if let data = resized.jpegData(compressionQuality: quality),
+               data.count <= Self.maxImageBytes {
+                return data
+            }
+        }
+        // Last resort: return lowest quality regardless of size
+        return resized.jpegData(compressionQuality: Self.qualitySteps.last ?? 0.3)
     }
 
     func resizedForAPIValidated(maxDimension: CGFloat = 1024) throws -> Data {

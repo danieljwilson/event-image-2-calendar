@@ -30,3 +30,6 @@ Package.resolved
 cloudflare-worker/node_modules/
 cloudflare-worker/.wrangler/
 cloudflare-worker/dist/
+
+# Design previews
+design/
