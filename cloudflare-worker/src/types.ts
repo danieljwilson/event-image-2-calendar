@@ -51,6 +51,59 @@ export interface AccessTokenClaims {
   exp: number;
 }
 
+// ---------------------------------------------------------------------------
+// Usage tracking
+// ---------------------------------------------------------------------------
+
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+}
+
+export interface ModelPricing {
+  input_per_million: number;   // USD per 1M input tokens
+  output_per_million: number;  // USD per 1M output tokens
+}
+
+export interface DeviceUsageRecord {
+  deviceId: string;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCostUsd: number;
+  extractionCount: number;
+  lastModel: string;
+  updatedAt: string;
+}
+
+export interface GlobalUsageRecord {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCostUsd: number;
+  extractionCount: number;
+  updatedAt: string;
+}
+
+export interface ExtractionLog {
+  id: string;
+  timestamp: string;
+  deviceId: string;
+  model: string;
+  provider: string;
+  modality: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  inputCostUsd: number;
+  outputCostUsd: number;
+  totalCostUsd: number;
+  processingTimeSec: number;
+  success: boolean;
+  errorDetail: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Environment
+// ---------------------------------------------------------------------------
+
 export interface Env {
   EVENTS: KVNamespace;
   RESEND_API_KEY: string;
@@ -58,4 +111,6 @@ export interface Env {
   DIGEST_EMAIL_FROM: string;
   JWT_SIGNING_SECRET: string;
   CLAUDE_API_KEY: string;
+  OPENAI_API_KEY: string;
+  ADMIN_DASHBOARD_KEY: string;
 }

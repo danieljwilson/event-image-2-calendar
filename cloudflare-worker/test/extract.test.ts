@@ -40,8 +40,38 @@ describe('validateExtractRequest', () => {
 
   it('rejects disallowed model', () => {
     const req = buildValidExtractRequest();
-    req.model = 'gpt-4o';
+    req.model = 'random-model-123';
     expect(validateExtractRequest(req)).toBeNull();
+  });
+
+  it('accepts gpt-5-nano model', () => {
+    const req = buildValidExtractRequest();
+    req.model = 'gpt-5-nano';
+    const result = validateExtractRequest(req);
+    expect(result).not.toBeNull();
+    expect(result!.model).toBe('gpt-5-nano');
+  });
+
+  it('accepts gpt-5-nano dated snapshot', () => {
+    const req = buildValidExtractRequest();
+    req.model = 'gpt-5-nano-2025-08-07';
+    const result = validateExtractRequest(req);
+    expect(result).not.toBeNull();
+    expect(result!.model).toBe('gpt-5-nano-2025-08-07');
+  });
+
+  it('accepts gpt-5.4-nano model', () => {
+    const req = buildValidExtractRequest();
+    req.model = 'gpt-5.4-nano';
+    const result = validateExtractRequest(req);
+    expect(result).not.toBeNull();
+  });
+
+  it('accepts gpt-5.4-nano dated snapshot', () => {
+    const req = buildValidExtractRequest();
+    req.model = 'gpt-5.4-nano-2026-03-17';
+    const result = validateExtractRequest(req);
+    expect(result).not.toBeNull();
   });
 
   it('rejects empty model', () => {

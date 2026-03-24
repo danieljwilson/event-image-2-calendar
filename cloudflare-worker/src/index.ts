@@ -1,6 +1,8 @@
+import { buildDashboardHTML } from './dashboard';
 import { buildDigestEmail } from './email';
+import { buildProviderRequest, calculateCost, calculateCostBreakdown, detectProvider, extractUsage, transformOpenAIResponse } from './providers';
 import { issueAccessToken, verifyAccessToken, verifyDeviceSignature } from './security';
-import { DeviceRecord, Env, EventPayload, StoredEventPayload } from './types';
+import { DeviceRecord, DeviceUsageRecord, Env, EventPayload, ExtractionLog, GlobalUsageRecord, StoredEventPayload, TokenUsage } from './types';
 
 import {
   isFreshTimestamp,
@@ -18,6 +20,10 @@ const DEVICE_PREFIX = 'device:';
 const PENDING_PREFIX = 'pending:';
 const SENT_PREFIX = 'sent:';
 const RATE_LIMIT_PREFIX = 'ratelimit:';
+const USAGE_DEVICE_PREFIX = 'usage:device:';
+const USAGE_GLOBAL_KEY = 'usage:global';
+const EXTRACT_LOG_PREFIX = 'extractlog:';
+const EXTRACT_LOG_TTL_SECONDS = 60 * 60 * 24 * 90; // 90 days
 
 const DEVICE_RECORD_TTL_SECONDS = 60 * 60 * 24 * 180;
 const PENDING_EVENT_TTL_SECONDS = 60 * 60 * 24 * 30;
@@ -30,8 +36,7 @@ const MAX_IP_EVENTS_PER_MINUTE = 30;
 const FREE_TIER_DAILY_EXTRACTIONS = 20;
 const MAX_IP_EXTRACTIONS_PER_MINUTE = 10;
 
-const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
-const CLAUDE_API_VERSION = '2023-06-01';
+// Provider API URLs and versions are managed in providers.ts
 
 export interface PendingEventEntry {
   key: string;
@@ -65,6 +70,14 @@ export default {
 
     if (request.method === 'DELETE' && url.pathname.startsWith('/events/')) {
       return handleEventDelete(request, env, url.pathname);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/usage') {
+      return handleGetUsage(request, env);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/admin/dashboard') {
+      return handleDashboard(url, env);
     }
 
     if (request.method === 'GET' && url.pathname === '/health') {
@@ -182,6 +195,94 @@ async function handleIssueToken(request: Request, env: Env): Promise<Response> {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Usage tracking
+// ---------------------------------------------------------------------------
+
+async function recordUsage(
+  env: Env,
+  deviceId: string,
+  model: string,
+  usage: TokenUsage
+): Promise<void> {
+  const now = new Date().toISOString();
+  const cost = calculateCost(model, usage);
+
+  // Update per-device aggregate
+  const deviceKey = `${USAGE_DEVICE_PREFIX}${deviceId}`;
+  const deviceRaw = await env.EVENTS.get(deviceKey);
+  const deviceRecord: DeviceUsageRecord = deviceRaw
+    ? JSON.parse(deviceRaw)
+    : { deviceId, totalInputTokens: 0, totalOutputTokens: 0, totalCostUsd: 0, extractionCount: 0, lastModel: model, updatedAt: now };
+  deviceRecord.totalInputTokens += usage.input_tokens;
+  deviceRecord.totalOutputTokens += usage.output_tokens;
+  deviceRecord.totalCostUsd += cost;
+  deviceRecord.extractionCount += 1;
+  deviceRecord.lastModel = model;
+  deviceRecord.updatedAt = now;
+
+  // Update global aggregate
+  const globalRaw = await env.EVENTS.get(USAGE_GLOBAL_KEY);
+  const globalRecord: GlobalUsageRecord = globalRaw
+    ? JSON.parse(globalRaw)
+    : { totalInputTokens: 0, totalOutputTokens: 0, totalCostUsd: 0, extractionCount: 0, updatedAt: now };
+  globalRecord.totalInputTokens += usage.input_tokens;
+  globalRecord.totalOutputTokens += usage.output_tokens;
+  globalRecord.totalCostUsd += cost;
+  globalRecord.extractionCount += 1;
+  globalRecord.updatedAt = now;
+
+  await Promise.all([
+    env.EVENTS.put(deviceKey, JSON.stringify(deviceRecord), { expirationTtl: DEVICE_RECORD_TTL_SECONDS }),
+    env.EVENTS.put(USAGE_GLOBAL_KEY, JSON.stringify(globalRecord)),
+  ]);
+}
+
+async function recordExtractionLog(
+  env: Env,
+  opts: {
+    deviceId: string;
+    model: string;
+    provider: string;
+    modality: string | null;
+    usage: TokenUsage | null;
+    processingTimeSec: number;
+    success: boolean;
+    errorDetail: string | null;
+  }
+): Promise<void> {
+  const id = crypto.randomUUID();
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
+  const costs = opts.usage
+    ? calculateCostBreakdown(opts.model, opts.usage)
+    : { input: 0, output: 0, total: 0 };
+
+  const log: ExtractionLog = {
+    id,
+    timestamp: now.toISOString(),
+    deviceId: opts.deviceId,
+    model: opts.model,
+    provider: opts.provider,
+    modality: opts.modality,
+    inputTokens: opts.usage?.input_tokens ?? 0,
+    outputTokens: opts.usage?.output_tokens ?? 0,
+    inputCostUsd: costs.input,
+    outputCostUsd: costs.output,
+    totalCostUsd: costs.total,
+    processingTimeSec: opts.processingTimeSec,
+    success: opts.success,
+    errorDetail: opts.errorDetail,
+  };
+
+  const key = `${EXTRACT_LOG_PREFIX}${dateStr}:${id}`;
+  await env.EVENTS.put(key, JSON.stringify(log), { expirationTtl: EXTRACT_LOG_TTL_SECONDS });
+}
+
+// ---------------------------------------------------------------------------
+// Extraction handler
+// ---------------------------------------------------------------------------
+
 async function handleExtract(request: Request, env: Env): Promise<Response> {
   const claims = await authenticateEventRequest(request, env);
   if (!claims) {
@@ -212,36 +313,186 @@ async function handleExtract(request: Request, env: Env): Promise<Response> {
     return jsonError(400, 'Invalid extraction request');
   }
 
-  const claudePayload: Record<string, unknown> = {
-    model: extractBody.model,
-    max_tokens: extractBody.max_tokens,
-    system: extractBody.system,
-    messages: extractBody.messages,
-  };
-  if (extractBody.tools) {
-    claudePayload.tools = extractBody.tools;
-  }
+  const providerReq = buildProviderRequest(extractBody, env);
+  const provider = detectProvider(extractBody.model);
+  const modality = extractBody.modality ?? null;
 
-  let claudeResponse: Response;
+  const startTime = Date.now();
+  let providerResponse: Response;
   try {
-    claudeResponse = await fetch(CLAUDE_API_URL, {
+    providerResponse = await fetch(providerReq.url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'anthropic-version': CLAUDE_API_VERSION,
-        'x-api-key': env.CLAUDE_API_KEY,
-      },
-      body: JSON.stringify(claudePayload),
+      headers: providerReq.headers,
+      body: providerReq.body,
     });
   } catch {
+    const elapsed = (Date.now() - startTime) / 1000;
+    await recordExtractionLog(env, {
+      deviceId: claims.device_id, model: extractBody.model, provider, modality,
+      usage: null, processingTimeSec: elapsed, success: false, errorDetail: 'Failed to reach extraction provider',
+    });
     return jsonError(502, 'Failed to reach extraction provider');
   }
+  const processingTimeSec = (Date.now() - startTime) / 1000;
 
-  return new Response(claudeResponse.body, {
-    status: claudeResponse.status,
-    headers: {
-      'Content-Type': claudeResponse.headers.get('Content-Type') ?? 'application/json',
-    },
+  // Anthropic: deserialize to capture usage, then pass through to iOS
+  if (provider === 'anthropic') {
+    if (!providerResponse.ok) {
+      const errorBody = await providerResponse.text();
+      await recordExtractionLog(env, {
+        deviceId: claims.device_id, model: extractBody.model, provider, modality,
+        usage: null, processingTimeSec, success: false, errorDetail: `HTTP ${providerResponse.status}: ${errorBody.slice(0, 200)}`,
+      });
+      return new Response(errorBody, {
+        status: providerResponse.status,
+        headers: { 'Content-Type': providerResponse.headers.get('Content-Type') ?? 'application/json' },
+      });
+    }
+
+    let responseJSON: unknown;
+    try {
+      responseJSON = await providerResponse.json();
+    } catch {
+      await recordExtractionLog(env, {
+        deviceId: claims.device_id, model: extractBody.model, provider, modality,
+        usage: null, processingTimeSec, success: false, errorDetail: 'Invalid JSON from extraction provider',
+      });
+      return jsonError(502, 'Invalid JSON from extraction provider');
+    }
+
+    const usage = extractUsage(responseJSON);
+    if (usage) {
+      await recordUsage(env, claims.device_id, extractBody.model, usage);
+    }
+    await recordExtractionLog(env, {
+      deviceId: claims.device_id, model: extractBody.model, provider, modality,
+      usage, processingTimeSec, success: true, errorDetail: null,
+    });
+
+    return new Response(JSON.stringify(responseJSON), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // OpenAI: transform to Claude format, capture usage, inject into response
+  if (!providerResponse.ok) {
+    const errorBody = await providerResponse.text();
+    await recordExtractionLog(env, {
+      deviceId: claims.device_id, model: extractBody.model, provider, modality,
+      usage: null, processingTimeSec, success: false, errorDetail: `HTTP ${providerResponse.status}: ${errorBody.slice(0, 200)}`,
+    });
+    return new Response(errorBody, {
+      status: providerResponse.status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  let responseJSON: unknown;
+  try {
+    responseJSON = await providerResponse.json();
+  } catch {
+    await recordExtractionLog(env, {
+      deviceId: claims.device_id, model: extractBody.model, provider, modality,
+      usage: null, processingTimeSec, success: false, errorDetail: 'Invalid JSON from extraction provider',
+    });
+    return jsonError(502, 'Invalid JSON from extraction provider');
+  }
+
+  const usage = extractUsage(responseJSON);
+  if (usage) {
+    await recordUsage(env, claims.device_id, extractBody.model, usage);
+  }
+  await recordExtractionLog(env, {
+    deviceId: claims.device_id, model: extractBody.model, provider, modality,
+    usage, processingTimeSec, success: true, errorDetail: null,
+  });
+
+  const transformed = transformOpenAIResponse(responseJSON);
+  if (!transformed) {
+    return jsonError(502, 'Unexpected response format from extraction provider');
+  }
+
+  // Inject usage into transformed response so iOS can read it
+  const responseBody: Record<string, unknown> = { ...transformed };
+  if (usage) {
+    responseBody.usage = usage;
+  }
+
+  return new Response(JSON.stringify(responseBody), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+async function handleGetUsage(request: Request, env: Env): Promise<Response> {
+  const claims = await authenticateEventRequest(request, env);
+  if (!claims) {
+    return jsonError(401, 'Unauthorized');
+  }
+
+  const [deviceRaw, globalRaw] = await Promise.all([
+    env.EVENTS.get(`${USAGE_DEVICE_PREFIX}${claims.device_id}`),
+    env.EVENTS.get(USAGE_GLOBAL_KEY),
+  ]);
+
+  return new Response(
+    JSON.stringify({
+      device: deviceRaw ? JSON.parse(deviceRaw) : null,
+      global: globalRaw ? JSON.parse(globalRaw) : null,
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } }
+  );
+}
+
+async function handleDashboard(url: URL, env: Env): Promise<Response> {
+  const key = url.searchParams.get('key');
+  if (!key || key !== env.ADMIN_DASHBOARD_KEY) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  const daysParam = parseInt(url.searchParams.get('days') ?? '7', 10);
+  const days = Number.isFinite(daysParam) && daysParam > 0 ? Math.min(daysParam, 90) : 7;
+
+  // List extraction log keys for the date range
+  const logs: ExtractionLog[] = [];
+  const startDate = new Date();
+  startDate.setUTCDate(startDate.getUTCDate() - days);
+
+  let cursor: string | undefined;
+  do {
+    const result = await env.EVENTS.list({
+      prefix: EXTRACT_LOG_PREFIX,
+      limit: 1000,
+      cursor,
+    });
+
+    // Fetch values in parallel batches of 50
+    const keys = result.keys;
+    for (let i = 0; i < keys.length; i += 50) {
+      const batch = keys.slice(i, i + 50);
+      const values = await Promise.all(batch.map((k) => env.EVENTS.get(k.name)));
+      for (const raw of values) {
+        if (!raw) continue;
+        try {
+          const log = JSON.parse(raw) as ExtractionLog;
+          if (new Date(log.timestamp) >= startDate) {
+            logs.push(log);
+          }
+        } catch { /* skip malformed */ }
+      }
+    }
+
+    cursor = result.list_complete ? undefined : result.cursor;
+  } while (cursor);
+
+  let html = buildDashboardHTML(logs, days);
+  // Replace key placeholder in filter links
+  html = html.replace(/KEY_PLACEHOLDER/g, encodeURIComponent(key));
+
+  return new Response(html, {
+    status: 200,
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
   });
 }
 

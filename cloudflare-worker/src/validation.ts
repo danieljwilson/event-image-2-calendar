@@ -117,7 +117,11 @@ export function validateEventPayload(input: unknown): EventPayload | null {
   };
 }
 
-const ALLOWED_MODELS = new Set(['claude-haiku-4-5']);
+const ALLOWED_MODELS = new Set([
+  'claude-haiku-4-5',
+  'gpt-5-nano', 'gpt-5-nano-2025-08-07',
+  'gpt-5.4-nano', 'gpt-5.4-nano-2026-03-17',
+]);
 const MAX_EXTRACT_TOKENS = 4096;
 
 export interface ExtractRequestBody {
@@ -126,6 +130,7 @@ export interface ExtractRequestBody {
   system: string;
   messages: unknown[];
   tools?: unknown[];
+  modality?: string;
 }
 
 export function validateExtractRequest(input: unknown): ExtractRequestBody | null {
@@ -152,6 +157,14 @@ export function validateExtractRequest(input: unknown): ExtractRequestBody | nul
   if (input.tools !== undefined) {
     if (!Array.isArray(input.tools)) return null;
     result.tools = input.tools;
+  }
+
+  const VALID_MODALITIES = new Set(['image', 'url', 'text', 'social']);
+  if (input.modality !== undefined) {
+    const modality = asString(input.modality);
+    if (modality && VALID_MODALITIES.has(modality)) {
+      result.modality = modality;
+    }
   }
 
   return result;

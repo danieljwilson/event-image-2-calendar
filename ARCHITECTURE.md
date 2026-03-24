@@ -6,7 +6,7 @@ Event Snap is an iOS app that extracts event details from poster photos (or shar
 
 - **iOS 17+** — SwiftUI, SwiftData, `@Observable` macro, zero SPM dependencies
 - **XcodeGen** — `project.yml` → `.xcodeproj`
-- **Claude API** — `claude-haiku-4-5` for vision/extraction, called server-side via Worker proxy
+- **LLM Extraction** — multi-provider via Worker proxy; currently **OpenAI GPT-5 nano** (`gpt-5-nano-2025-08-07`), with Anthropic Claude (`claude-haiku-4-5`) available as fallback. Provider auto-detected from model name.
 - **Cloudflare Worker** — TypeScript, auth, extraction proxy (`POST /extract`), KV storage, cron-triggered digest
 - **Resend** — transactional email for daily digest
 
@@ -23,8 +23,9 @@ flowchart LR
         Keychain["Keychain\nP-256 Key + Device ID"]
     end
 
-    subgraph Claude["Claude API"]
-        Vision["POST /v1/messages\nclaude-haiku-4-5"]
+    subgraph LLM["LLM Provider (auto-routed)"]
+        OpenAI["OpenAI Responses API\ngpt-5-nano"]
+        Anthropic["Anthropic Messages API\nclaude-haiku-4-5"]
     end
 
     subgraph Edge["Cloudflare Worker"]
@@ -56,8 +57,10 @@ flowchart LR
     Token --> DevRec
     Token -->|"JWT (10 min)"| App
     App -->|"Bearer JWT + image/URL/text"| Extract
-    Extract -->|"Server-side Claude request"| Vision
-    Vision -->|"Structured JSON"| Extract
+    Extract -->|"Translated request"| OpenAI
+    Extract -.->|"Fallback"| Anthropic
+    OpenAI -->|"Translated to Claude format"| Extract
+    Anthropic -.->|"Passthrough"| Extract
     Extract -->|"Structured JSON"| App
     App -->|"Bearer JWT"| Events
     Events --> Pending
@@ -84,15 +87,17 @@ EventImage2Calendar/                      # Main app target
 │   ├── DigestService.swift               # Local digest outbox + POST /events flush/retry
 │   ├── WorkerAuthService.swift           # Device key registration + JWT retrieval + digest preferences
 │   ├── WebSearchService.swift            # Google search URL helper for descriptions
-│   └── CrashReportingService.swift       # MetricKit subscriber — crash/hang/diagnostic reports
+│   ├── CrashReportingService.swift       # MetricKit subscriber — crash/hang/diagnostic reports
+│   └── FeedbackService.swift             # TestFlight detection, device metadata, screenshot capture, feedback log
 ├── Views/
 │   ├── ContentView.swift                 # Root (onboarding gate → EventListView)
-│   ├── OnboardingView.swift              # 7-page onboarding (features, permissions, digest email, final)
+│   ├── OnboardingView.swift              # Onboarding (7 pages App Store, 9 pages TestFlight) with progress bar + navigation chevrons
 │   ├── CameraView.swift                  # Camera sheet + ImagePicker
-│   ├── EventListView.swift               # Event queue with swipe actions + DateCorrectionSheet + grouped processed list
+│   ├── EventListView.swift               # 3-tab layout (Pending/Saved/Settings) with swipe actions + DateCorrectionSheet
 │   ├── EventRowView.swift                # Compact list row
-│   ├── EventDetailView.swift             # Editable form + calendar buttons
-│   └── SettingsView.swift                # User preferences (digest toggle + email, camera-on-launch, extraction language)
+│   ├── EventDetailView.swift             # Editable form + calendar buttons + multi-day date selection
+│   ├── SettingsView.swift                # SettingsFormContent (embedded in tab) + SettingsView (sheet wrapper) + DebugLogView + FeedbackLogView
+│   └── FeedbackMailView.swift            # MFMailComposeViewController wrapper for in-app feedback
 └── PrivacyInfo.xcprivacy                 # App privacy manifest
 
 ShareExtension/                           # Share Extension target
@@ -109,6 +114,7 @@ cloudflare-worker/
 ├── wrangler.toml                         # Worker config + cron trigger (8 AM daily)
 └── src/
     ├── index.ts                          # Route handlers (/extract, /events, /auth/*) + scheduled digest
+    ├── providers.ts                      # LLM provider detection + request/response translation (Anthropic ↔ OpenAI)
     ├── email.ts                          # HTML digest email builder
     ├── security.ts                       # JWT issuance/verification + ECDSA signatures
     ├── validation.ts                     # Request/payload schema validation
@@ -130,12 +136,13 @@ Camera / Photo Library / Share Extension
                 │
                 ▼
       Cloudflare Worker /extract
-      (JWT auth + rate limiting)
+      (JWT auth + rate limiting +
+       provider translation)
     ┌── auto-retry (3x, exponential backoff: 2s/4s/8s)
     │   for retryable errors (network, 5xx, 429)
                 │
                 ▼
-           Claude API
+      LLM Provider (OpenAI / Anthropic)
                 │
                 ▼
     PersistedEvent (SwiftData)
@@ -160,13 +167,13 @@ Camera / Photo Library / Share Extension
 **Status values:** `processing` → `ready` → `added` | `dismissed` | `failed`
 
 **Error handling & retry:**
-- `ClaudeAPIError` classifies errors as retryable (network, 5xx, 429, 413) or permanent (auth, decoding, no-event-found). Error messages are source-aware: "image" for pure photos, "link" for URL shares, "share" for mixed image+URL shares, "text" for text-only shares
+- `ClaudeAPIError` classifies errors as retryable (network, 5xx, 429, 413) or permanent (auth, decoding, no-event-found). Error messages are source-aware: "image" for pure photos, "link" for URL shares, "share" for mixed image+URL shares, "text" for text-only shares. Social media URLs (Instagram, Facebook) get a specific message suggesting image/screenshot sharing as fallback when extraction fails
 - `performExtraction` auto-retries retryable errors up to 3 times with exponential backoff (2s, 4s, 8s)
 - Manual retry available via swipe action or detail view button, capped at 5 total attempts (`PersistedEvent.maxRetryCount`)
 - On app launch: events stuck in `.processing` for >5 min are recovered to `.failed`; failed events with retryable errors are auto-retried
 - Image validation: progressive JPEG compression (quality 0.7 → 0.5 → 0.3) with 1.5 MB size cap before API upload
 
-**Multi-day events:** When Claude detects a date range with no specific timed event, it returns `is_multi_day: true` with an `event_dates` array. The detail view offers two modes: "Select Days" (multi-select checklist — pick any combination of dates, each becomes a separate all-day calendar event) or "Full Event" (entire date range as one event). Multi-date selection creates multiple Google Calendar entries (opened with staggered delays) or a single ICS file containing multiple VEVENTs.
+**Multi-day events:** Claude returns `is_multi_day: true` with an `event_dates` array in two scenarios: (1) date-range events like festivals — `event_dates` contains date-only strings (`2026-04-02`), rendered as all-day; (2) recurring performances (same show/concert at the same venue on multiple dates) — `event_dates` contains ISO 8601 datetime strings (`2026-04-02T20:00:00`), preserving performance times. The detail view offers two modes: "Select Days" (multi-select checklist — pick any combination of dates, each becomes a separate calendar event with correct duration) or "Full Event" (entire date range as one event). Multi-date selection creates multiple Google Calendar entries (opened with staggered delays) or a single ICS file containing multiple VEVENTs.
 
 ### Digest flow (reminder-based)
 
@@ -197,19 +204,22 @@ All extraction modes use Claude's **`web_search_20250305`** tool, allowing the m
 
 ### Server-side proxy
 
-`ClaudeAPIService` sends all extraction requests to `POST /extract` on the Cloudflare Worker. The Worker validates auth, enforces rate limits (50 extractions/device/hour, 10/IP/minute), injects the server-side Claude API key, and proxies the request to Anthropic. The Claude API key never leaves the server.
+`ClaudeAPIService` sends all extraction requests to `POST /extract` on the Cloudflare Worker in Claude Messages API format. The Worker validates auth, enforces rate limits, detects the LLM provider from the model name (via `providers.ts`), translates the request to the target provider's format, and proxies to the correct API. For OpenAI models, the Worker uses the Responses API (`POST /v1/responses`) and translates the response back to Claude format so iOS parsing code is unchanged. API keys never leave the server.
 
 The app authenticates via `WorkerAuthService`: on first use it registers a P-256 device key, then acquires a short-lived JWT for each extraction. On 401, the token is refreshed and the request retried once.
 
 Three extraction modes in `ClaudeAPIService`:
 
-- **Image extraction** (`extractEvents` / `extractEvent`): Sends base64 JPEG + structured prompt with `web_search` tool (max 5 uses). Returns a JSON **array** of events — a single image may contain multiple distinct events at different venues/times. `extractEvent` is a convenience wrapper returning the first event only.
+- **Image extraction** (`extractEvents` / `extractEvent`): Sends base64 JPEG + structured prompt with `web_search` tool (max 5 uses). Returns a JSON **array** of events — a single image may contain multiple distinct events at different venues/times. When the same event is performed on multiple dates (e.g., a ballet or concert series), it returns a single entry with `is_multi_day: true` and `event_dates` containing datetime strings. `extractEvent` is a convenience wrapper returning the first event only.
 - **Text extraction** (`extractEventFromText`): Sends page text content + `web_search` tool (max 3 uses). Truncates input to 4000 chars.
 - **URL extraction** (`extractEventFromURL`): Sends bare URL + `web_search` tool (max 5 uses) — Claude searches the web to find and extract event details from the URL.
+- **Social media extraction** (`extractEventFromSocialURL`): For auth-walled platforms (Instagram, Facebook). Claude cannot access the page directly, so the prompt instructs it to extract clues from the caption text and URL, then use web search to find the event by name/venue/performer. Uses `web_search` tool (max 5 uses).
 
 All three methods accept a `language` parameter (default: "English") that controls the output language of the `description` field. Titles, venue names, and addresses are kept in their original language. The preference is stored in `UserDefaults` as `extractionLanguage` and configurable in Settings.
 
-**Web search response handling:** With web search enabled, Claude's response `content` array may contain `[text, server_tool_use, web_search_tool_result, text, ...]`. The parser concatenates all `text` blocks and extracts JSON from the result. The Worker passes the Claude response through unchanged, so all parsing remains on the iOS side.
+**Web search response handling:** With web search enabled, the LLM response may contain tool-use blocks alongside text. For Anthropic, the Worker passes the response through unchanged; for OpenAI, the Worker's `transformOpenAIResponse()` extracts `output_text` blocks and translates them to Claude `text` blocks. In both cases, the iOS client's parser concatenates all `text` blocks and extracts JSON from the result.
+
+**Token budget adjustment:** Claude's `max_tokens` counts only text output tokens — tool use is separate. OpenAI's `max_output_tokens` counts everything including web search execution. The Worker compensates: when web_search tools are present in an OpenAI request, `max_output_tokens` is set to 16384 (regardless of the client's `max_tokens`) to ensure the model has room for both web search and JSON output. Without web search, the client's value is passed through unchanged.
 
 **Multi-event images:** When a poster/screenshot lists several events (e.g., a cultural weekend schedule with events at different venues), `extractEvents` returns one `EventDetails` per distinct event. `BackgroundEventProcessor` applies the first result to the original `PersistedEvent` and creates additional `PersistedEvent` rows for the rest.
 
@@ -221,22 +231,37 @@ When a share includes both an image and a URL (e.g., Instagram, Facebook), the i
 
 ### URL Share Extraction Pipeline
 
-When a URL is shared (from Instagram, Safari, etc.), `BackgroundEventProcessor.extractFromURL` classifies the companion `sourceText`:
+When a URL is shared (from Instagram, Safari, etc.), `BackgroundEventProcessor.extractFromURL` classifies the companion `sourceText` using an adaptive threshold:
 
-1. **Substantive text** (>50 chars after stripping URLs) → send to `extractEventFromText` with `web_search` tool
-2. **Non-substantive text** (short share boilerplate like "Check out this post") or no text → send bare URL to `extractEventFromURL` with `web_search` tool (Claude fetches page content via web search)
+1. **Substantive text** (above threshold after stripping URLs) → send to `extractEventFromText` with `web_search` tool
+2. **Social media URL with insufficient text** (Instagram, Facebook) → OG metadata prefetch chain (see below)
+3. **Non-social URL with insufficient text** → send bare URL to `extractEventFromURL` with `web_search` tool (Claude fetches page content via web search)
 
-The 50-char threshold is a heuristic; decisions are logged with original and stripped text lengths for tuning.
+**Adaptive threshold:** Social media URLs (Instagram, Facebook) use a 15-char threshold — even short captions like "Concert March 28 8pm" contain extractable details. Non-social URLs use the standard 50-char threshold. Decisions are logged with original and stripped text lengths for tuning.
+
+### Social Media OG Metadata Prefetch
+
+Instagram and Facebook shares typically provide only a `public.url` — no image, no caption text. Claude's `web_search` tool cannot access auth-walled social media pages. To bridge this gap, `BackgroundEventProcessor` prefetches Open Graph metadata directly from the social media URL before calling Claude.
+
+**How it works:** An HTTP GET with `User-Agent: facebookexternalhit/1.1` retrieves the page HTML. Instagram and Facebook serve full OG meta tags to this UA (since Meta owns both platforms and uses this UA for link previews). The parser extracts `og:title`, `og:description`, and `og:image` from the HTML.
+
+**Extraction priority chain for social media URLs:**
+
+1. **OG image + OG text** → download and downsample the OG image via `ImageResizer.downsample(data:)`, then send to `ClaudeAPIService.extractEvents(imageData:additionalContext:)` with OG title/description as context. This is the highest-quality path — equivalent to a camera photo with caption metadata.
+2. **OG text only** (no image URL, or image download failed) → send OG title + description to `ClaudeAPIService.extractEventFromText(text:sourceURL:)` with web search enabled.
+3. **No OG data** (fetch failed entirely — private account, network error, etc.) → fall back to `ClaudeAPIService.extractEventFromSocialURL(urlString:captionText:)` which uses web search to find the event indirectly.
+
+**Long-term target:** Migrate from OG tag scraping to the [Meta oEmbed API](https://developers.facebook.com/docs/graph-api/reference/oembed-post/) (`GET /v25.0/instagram_oembed?url=...&access_token=...`), which returns structured caption HTML, author name, and thumbnail URL. Requires a Meta app with "Meta oEmbed Read" app review approval + an app access token. See ROADMAP.
 
 **Response schema:** `{ title, start_datetime, end_datetime, venue, address, description, timezone, is_multi_day, event_dates, date_confirmed, time_confirmed }`
 
 ### Missing Date/Time & Past Event Handling
 
-Claude returns `date_confirmed` and `time_confirmed` booleans alongside `start_datetime` (which is always populated — using today's date as placeholder when the date is unknown, or `T00:00:00` when the time is unknown). `EventDetailsDTO.toEventDetails()` maps these to `hasExplicitDate` and `hasExplicitTime` on `EventDetails`. `PersistedEvent.applyExtraction()` sets the event to `.failed` with a field-specific message ("Please enter the date", "Please enter the time", or both) when either flag is false.
+Claude returns `date_confirmed` and `time_confirmed` booleans alongside `start_datetime` (which is always populated — using today's date as placeholder when the date is unknown, or `T00:00:00` when the time is unknown). `EventDetailsDTO.toEventDetails()` maps these to `hasExplicitDate` and `hasExplicitTime` on `EventDetails`. When `time_confirmed` is not provided by the API (e.g., from text/URL extraction paths that omit the field), `hasExplicitTime` is inferred from the datetime format — date-only strings (no `T` component) are treated as time-unknown. `PersistedEvent.applyExtraction()` sets the event to `.failed` with a field-specific message when either flag is false.
 
 **Past event detection:** After date/time validation, `applyExtraction()` checks whether the event's start date is in the past (`isPastStartDate`). If so, the event is set to `.failed` with the message "This event is in the past. Update the date and confirm if it will occur again." The user can edit the date in `EventDetailView` and tap "Confirm Updated Date" to transition to `.ready`. Past events are tappable in `EventListView` via `NavigationLink` for easy correction.
 
-The user sees a focused `DateCorrectionSheet` (presented from `EventListView`) that shows only the missing picker component(s) — date-only, time-only, or both. The sheet merges the user's correction with the already-extracted values (e.g., keeping the extracted time when only the date was missing) and transitions the event to `.ready`. Changing the start date automatically syncs the end date, preserving the originally extracted duration. A fallback confirmation button is also available in `EventDetailView` for events reached via navigation.
+The user sees a focused `DateCorrectionSheet` (presented from `EventListView`) that shows only the missing picker component(s) — date-only, time-only, or both. When time is missing, the sheet presents a segmented "All Day / Specific Time" picker so the user can choose whether to create an all-day event or enter specific start/end times. The sheet merges the user's correction with the already-extracted values (e.g., keeping the extracted time when only the date was missing) and transitions the event to `.ready`. Changing the start date automatically syncs the end date, preserving the originally extracted duration. A fallback confirmation button is also available in `EventDetailView` for events reached via navigation.
 
 The prompt enforces consistency: if no numeric calendar date is visible anywhere in an image, all events extracted from that image must have `date_confirmed: false`. Day-of-week names (samedi, vendredi, etc.) are explicitly listed as not constituting confirmed dates.
 
@@ -246,12 +271,12 @@ The following components can be independently swapped or upgraded:
 
 | Component | Location | Current Value | Notes |
 |-----------|----------|---------------|-------|
-| **AI Model** | `ClaudeAPIService.swift` — `"model"` key in request bodies | `claude-haiku-4-5` | Can swap to `claude-sonnet-4-6` or `claude-opus-4-6` for higher quality (at higher cost). All three extraction methods use the same model string. |
-| **Web Search Tool** | `ClaudeAPIService.webSearchTool()` helper | `web_search_20250305` | Newer `web_search_20260209` adds dynamic filtering (`allowed_domains`, `blocked_domains`) but only works with Sonnet 4.6+ and Opus 4.6 (not Haiku 4.5). Upgrade requires changing the model too. |
-| **API Version Header** | `cloudflare-worker/src/index.ts` — `CLAUDE_API_VERSION` constant | `2023-06-01` | Set server-side in the Worker proxy. Must be compatible with the web search tool version in use. |
+| **AI Model** | `ClaudeAPIService.swift` — `extractionModel` constant | `gpt-5-nano-2025-08-07` | Worker auto-routes by prefix: `gpt-*` → OpenAI Responses API, `claude-*` → Anthropic Messages API. Also add new models to `ALLOWED_MODELS` in `validation.ts`. Available: `claude-haiku-4-5`, `gpt-5-nano-2025-08-07`, `gpt-5.4-nano-2026-03-17`. OpenAI models: [developers.openai.com/api/docs/models/all](https://developers.openai.com/api/docs/models/all). |
+| **Web Search Tool** | `ClaudeAPIService.webSearchTool()` helper + `providers.ts` | Claude: `web_search_20250305` → OpenAI: `web_search` | Worker translates the Claude-format tool to the OpenAI equivalent automatically. Claude's `max_uses` is dropped for OpenAI (no equivalent). |
+| **Provider Translation** | `cloudflare-worker/src/providers.ts` | Anthropic (passthrough) / OpenAI (translate) | Transforms request format (system→instructions, image blocks, tools) and response format (output_text→text blocks) so iOS parsing is unchanged. |
 | **User Location** | `ClaudeAPIService.webSearchTool()` — `user_location` parameter | Device timezone + country code | Provides localized web search results. Derived from `TimeZone.current` and `Locale.current.region`. Could be enhanced with reverse geocoding for city-level precision. |
 | **Image Compression** | `Shared/ImageResizer.swift` | 1024px max, JPEG 0.7→0.5→0.3 progressive, 1.5 MB cap | Progressive quality reduction keeps images under the Worker body limit after base64 inflation. |
-| **Extraction Gateway** | `ClaudeAPIService.swift` → Worker `/extract` route → Claude | App → Worker → Claude | Worker proxy keeps provider secrets server-side and enforces rate limits centrally. |
+| **Extraction Gateway** | `ClaudeAPIService.swift` → Worker `/extract` route → LLM | App → Worker → OpenAI/Anthropic | Worker proxy keeps provider secrets server-side, enforces rate limits centrally, and translates between providers. |
 | **Digest Email Provider** | `cloudflare-worker/src/email.ts` | Resend | Any transactional email API (SendGrid, Mailgun, etc.) — swap the HTTP call in `sendDigestEmail()`. |
 
 ## Calendar Integration
@@ -324,6 +349,24 @@ The daily device cap is the primary cost control knob. To adjust the free tier l
 
 **Deferred:** Durable Objects for atomic rate limiting and Cloudflare WAF rules on `/events` and `/extract`.
 
+### Usage & Cost Tracking
+
+The Worker captures token usage from every LLM response (both OpenAI and Anthropic return `usage.input_tokens` / `usage.output_tokens`). After each extraction:
+
+1. `extractUsage()` reads token counts from the provider response body
+2. `calculateCostBreakdown()` computes input/output/total dollar cost using `MODEL_PRICING` constants in `providers.ts`
+3. `recordUsage()` increments aggregate KV counters (`usage:device:{deviceId}`, `usage:global`)
+4. `recordExtractionLog()` writes an individual `ExtractionLog` record to `extractlog:{YYYY-MM-DD}:{uuid}` (90-day TTL)
+5. Usage is injected into the response body so the iOS client can store per-event token counts
+
+**Extraction log fields:** id, timestamp, deviceId, model, provider, modality (image/url/text/social — sent by iOS in the extract request), input/output tokens, input/output/total cost, processing time (Worker-measured LLM call duration), success, error detail.
+
+**Analytics dashboard:** `GET /admin/dashboard?key=<ADMIN_DASHBOARD_KEY>` serves an HTML page with summary cards (total extractions, cost, success rate, avg time) and a detailed table of all extractions. Filterable by day range. Protected by a shared secret (`ADMIN_DASHBOARD_KEY` Wrangler secret). Not visible to app users.
+
+**Pricing updates:** Edit `MODEL_PRICING` in `providers.ts` and `wrangler deploy`. Aligned with the existing model-change workflow (ALLOWED_MODELS is also a code constant).
+
+**KV race condition:** Two concurrent extractions could lose an aggregate counter increment. Acceptable for a pre-release single-developer app; individual extraction logs are not affected.
+
 ### Environments
 
 The production target uses separate `dev`, `staging`, and `production` Worker environments, each with:
@@ -354,7 +397,7 @@ The production target uses separate `dev`, `staging`, and `production` Worker en
 
 - `application/json` content-type enforcement
 - Event payloads (`/events`): 32KB body limit, field-level validation (title 1-200, description 0-4000, venue/address 0-200, URL 0-2048), date parsing/ordering, timezone validation
-- Extraction payloads (`/extract`): 8 MB body limit (for base64 images), model allowlist (`claude-haiku-4-5`), max_tokens cap (4096), required system prompt and messages
+- Extraction payloads (`/extract`): 8 MB body limit (for base64 images), model allowlist (Claude + OpenAI models in `validation.ts`), client max_tokens cap (4096, boosted to 16384 for OpenAI when web_search tools are present), required system prompt and messages
 - Timestamp freshness (5-minute skew tolerance)
 
 ### Output Sanitization
@@ -366,12 +409,13 @@ The production target uses separate `dev`, `staging`, and `production` Worker en
 
 | Secret | Location | Purpose |
 |--------|----------|---------|
-| `CLAUDE_API_KEY` | Wrangler secret (server-side only) | Claude API access via `/extract` proxy |
+| `CLAUDE_API_KEY` | Wrangler secret (server-side only) | Anthropic Claude API access via `/extract` proxy |
+| `OPENAI_API_KEY` | Wrangler secret (server-side only) | OpenAI API access via `/extract` proxy |
 | `RESEND_API_KEY` | Wrangler secret | Email sending |
 | `DIGEST_EMAIL_TO` | Wrangler secret | Digest delivery (single recipient; per-user in future) |
 | `JWT_SIGNING_SECRET` | Wrangler secret | JWT HMAC signing |
 
-No secrets are shipped in the iOS app binary. The Claude API key is injected server-side by the Worker.
+No secrets are shipped in the iOS app binary. All LLM API keys are injected server-side by the Worker.
 
 **Rotation:** Rotate `JWT_SIGNING_SECRET` immediately if compromised. All existing tokens become invalid (by design — 10-min TTL limits exposure). Future: multi-key rotation with active + grace windows.
 
@@ -394,6 +438,15 @@ The share extension runs in a separate process and does not generate MetricKit p
 ### Debug Log
 
 `SharedContainerService.writeDebugLog` appends to `share_debug.log` in the App Groups container. Both the main app and the share extension write to this log. Log rotation truncates to the last 500 KB when the file exceeds 1 MB.
+
+### In-App Feedback
+
+`FeedbackService` + `FeedbackMailView` provide two low-friction feedback channels for TestFlight testers:
+
+1. **Settings row** ("Send Feedback") — always available, opens `MFMailComposeViewController` pre-filled with device metadata, auto-attaches a screenshot and the debug log. Fallback: copies email address to clipboard if Mail is not configured.
+2. **Screenshot-triggered prompt** — `EventListView` listens for `UIApplication.userDidTakeScreenshotNotification`, gated by `FeedbackService.isTestFlight` (sandbox receipt check). On screenshot, captures the current screen and presents an alert offering to send feedback with the screenshot attached.
+
+Every sent feedback is logged to `feedback_log.json` in the App Groups container (via `FeedbackService.logFeedback`), viewable in Settings > Diagnostics > Feedback Log.
 
 ## Testing & CI
 

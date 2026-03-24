@@ -84,7 +84,7 @@ struct EventDetailsDTO: Decodable {
         }
 
         let hasDate = dateConfirmed ?? (parsedStart != nil)
-        let hasTime = timeConfirmed ?? true
+        let hasTime = timeConfirmed ?? Self.hasTimeComponent(startDatetime)
 
         return EventDetails(
             title: title ?? "Untitled Event",
@@ -94,7 +94,7 @@ struct EventDetailsDTO: Decodable {
             address: address ?? "",
             eventDescription: Self.stripCiteTags(description ?? ""),
             timezone: timezone,
-            isAllDay: isMulti,
+            isAllDay: isMulti && !Self.hasTimeComponent(startDatetime),
             eventDates: eventDates ?? [],
             hasExplicitDate: hasDate,
             hasExplicitTime: hasTime
@@ -105,6 +105,12 @@ struct EventDetailsDTO: Decodable {
     private static func stripCiteTags(_ text: String) -> String {
         text.replacingOccurrences(of: #"<cite[^>]*>"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: "</cite>", with: "")
+    }
+
+    /// Returns true if the datetime string contains a meaningful time component (not midnight placeholder).
+    private static func hasTimeComponent(_ dateString: String?) -> Bool {
+        guard let s = dateString else { return false }
+        return s.contains("T") && !s.hasSuffix("T00:00:00")
     }
 
     private func parseDate(_ string: String?, eventTimeZone: TimeZone?) -> Date? {

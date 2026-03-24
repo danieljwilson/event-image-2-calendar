@@ -62,6 +62,14 @@ enum ClaudeAPIError: LocalizedError {
 }
 
 enum ClaudeAPIService {
+    /// The LLM model used for all extraction requests.
+    /// Change this to switch providers — the Worker routes automatically based on model prefix:
+    ///   gpt-*  → OpenAI Responses API
+    ///   claude-*  → Anthropic Messages API
+    /// After changing, ensure the model is in ALLOWED_MODELS in cloudflare-worker/src/validation.ts.
+    /// Available OpenAI models: https://developers.openai.com/api/docs/models/all
+    private static let extractionModel = "gpt-5-nano-2025-08-07"
+
     private static let extractEndpoint = URL(string: "https://event-digest-worker.daniel-j-wilson-587.workers.dev/extract")!
 
     static func extractEvent(
@@ -69,10 +77,10 @@ enum ClaudeAPIService {
         location: CLLocationCoordinate2D?,
         additionalContext: String? = nil,
         language: String = "English"
-    ) async throws -> EventDetails {
-        let events = try await extractEvents(imageData: imageData, location: location, additionalContext: additionalContext, language: language)
-        guard let first = events.first else { throw ClaudeAPIError.noEventFound }
-        return first
+    ) async throws -> ExtractionOutput {
+        let output = try await extractEvents(imageData: imageData, location: location, additionalContext: additionalContext, language: language)
+        guard !output.events.isEmpty else { throw ClaudeAPIError.noEventFound }
+        return output
     }
 
     static func extractEvents(
@@ -80,7 +88,7 @@ enum ClaudeAPIService {
         location: CLLocationCoordinate2D?,
         additionalContext: String? = nil,
         language: String = "English"
-    ) async throws -> [EventDetails] {
+    ) async throws -> ExtractionOutput {
         let base64Image = imageData.base64EncodedString()
 
         let locationContext: String
@@ -125,8 +133,15 @@ enum ClaudeAPIService {
         2. Each event with its own time and/or venue is a separate entry in the array.
         3. For multi-day events (tournaments, festivals), set is_multi_day: true with \
            start/end as date-only strings.
-        4. For timed events (vernissage, concert, talk, screening), set is_multi_day: false. If no \
-           end time given, estimate a reasonable duration for the event type.
+        3b. When the SAME event (same title, same venue) is performed on multiple \
+           specific dates (e.g. a show, concert, or ballet with several performance \
+           dates), return it as a SINGLE entry with is_multi_day: true. Populate \
+           event_dates with ISO 8601 datetime strings that include the performance \
+           time (e.g. "2026-04-02T20:00:00"). Set start_datetime to the first \
+           performance datetime and end_datetime to the END of the first performance \
+           (so duration can be calculated per performance).
+        4. For timed events with only ONE date (vernissage, concert, talk, screening), \
+           set is_multi_day: false. If no end time given, estimate a reasonable duration.
         5. Extract ONLY attendable events (things a person would go to at a specific \
            time). An exhibition's date range or a show's run is NOT a separate event — \
            mention it in the description of the timed event (e.g. vernissage, guided \
@@ -165,7 +180,8 @@ enum ClaudeAPIService {
           "date_confirmed": true,
           "time_confirmed": true
         }
-        Set null for unknown fields (except start_datetime). For is_multi_day events, list dates in event_dates array.
+        Set null for unknown fields (except start_datetime). For is_multi_day events, \
+        list dates in event_dates array (date-only for festivals, datetime for timed performances).
 
         OUTPUT LANGUAGE: Write the "description" field in \(language). \
         Keep the title, venue, and address in their original language as shown in the image.
@@ -190,8 +206,9 @@ enum ClaudeAPIService {
         """
 
         let requestBody: [String: Any] = [
-            "model": "claude-haiku-4-5",
+            "model": Self.extractionModel,
             "max_tokens": 4096,
+            "modality": "image",
             "system": systemPrompt,
             "tools": [Self.webSearchTool(maxUses: 5)],
             "messages": [
@@ -224,7 +241,7 @@ enum ClaudeAPIService {
         urlString: String,
         location: CLLocationCoordinate2D?,
         language: String = "English"
-    ) async throws -> EventDetails {
+    ) async throws -> ExtractionOutput {
         let locationContext: String
         if let loc = location {
             locationContext = """
@@ -245,7 +262,8 @@ enum ClaudeAPIService {
         If you cannot determine the date, set start_datetime to null — do NOT default to today. \
         Include the direct event page URL in the description.
 
-        Respond with ONLY a JSON object, no markdown fences. Schema:
+        CRITICAL: Your final response MUST be ONLY a valid JSON object — no explanations, \
+        no markdown, no commentary before or after the JSON. Schema:
         {
           "title": "Event title",
           "start_datetime": "ISO 8601 or date-only",
@@ -257,7 +275,9 @@ enum ClaudeAPIService {
           "is_multi_day": false,
           "event_dates": []
         }
-        Set null for unknown fields. For is_multi_day events, list dates in event_dates array.
+        Set null for unknown fields. For is_multi_day events, list dates in event_dates array. \
+        If you cannot find sufficient event details after searching, respond with a JSON object \
+        where all fields are null (title: null, start_datetime: null, etc.).
 
         OUTPUT LANGUAGE: Write the "description" field in \(language). \
         Keep the title, venue, and address in their original language.
@@ -270,8 +290,105 @@ enum ClaudeAPIService {
         """
 
         let requestBody: [String: Any] = [
-            "model": "claude-haiku-4-5",
+            "model": Self.extractionModel,
             "max_tokens": 2048,
+            "modality": "url",
+            "system": systemPrompt,
+            "tools": [Self.webSearchTool(maxUses: 5)],
+            "messages": [
+                [
+                    "role": "user",
+                    "content": userText
+                ]
+            ]
+        ]
+
+        return try await sendRequest(requestBody)
+    }
+
+    // MARK: - Social media extraction (auth-walled URLs like Instagram/Facebook)
+
+    static func extractEventFromSocialURL(
+        urlString: String,
+        captionText: String?,
+        location: CLLocationCoordinate2D?,
+        language: String = "English"
+    ) async throws -> ExtractionOutput {
+        let locationContext: String
+        if let loc = location {
+            locationContext = """
+            The user is located at latitude \(loc.latitude), longitude \(loc.longitude). \
+            Use this to identify the city/region and pick the nearest location for touring events.
+            """
+        } else {
+            locationContext = "No location data available."
+        }
+
+        let systemPrompt = """
+        You are an expert event detail extractor. The user has shared a social media link \
+        (Instagram or Facebook). You CANNOT access the page directly — it requires authentication.
+
+        STRATEGY:
+        1. Look at the URL for clues (username, post ID).
+        2. If caption text is provided, extract any event details (name, date, time, venue) from it.
+        3. Use web search to find the actual event by searching for the event name, venue, \
+           or performer mentioned in the caption or URL. Try searches like:
+           - "[performer/venue from caption] event [city]"
+           - "[username from URL] event"
+           - Key phrases from the caption + "event" or "concert" or "show"
+        4. Cross-reference what you find with any details from the caption.
+
+        Today is \(Self.todayString()), \(Self.todayDayOfWeek()). All dates must be in the future. \
+        ALWAYS populate start_datetime with the actual event date and time as ISO 8601. \
+        The start_datetime field is the ONLY field used for calendar creation. \
+        If you cannot determine the date, set start_datetime to null — do NOT default to today. \
+        Include the direct event page URL in the description.
+
+        CRITICAL: Your final response MUST be ONLY a valid JSON object — no explanations, \
+        no markdown, no commentary before or after the JSON. Schema:
+        {
+          "title": "Event title",
+          "start_datetime": "ISO 8601 or date-only",
+          "end_datetime": "ISO 8601 or date-only",
+          "venue": "Specific venue name",
+          "address": "Full address with city and postal code",
+          "description": "1-3 sentences. Include direct event page URL.",
+          "timezone": "IANA timezone",
+          "is_multi_day": false,
+          "event_dates": []
+        }
+        Set null for unknown fields. For is_multi_day events, list dates in event_dates array. \
+        If you cannot find sufficient event details after searching, respond with a JSON object \
+        where all fields are null (title: null, start_datetime: null, etc.).
+
+        OUTPUT LANGUAGE: Write the "description" field in \(language). \
+        Keep the title, venue, and address in their original language.
+        """
+
+        let captionBlock: String
+        if let captionText, !captionText.isEmpty {
+            captionBlock = """
+
+            Caption text shared with the link:
+            \(String(captionText.prefix(2000)))
+            """
+        } else {
+            captionBlock = "\nNo caption text was provided with the link."
+        }
+
+        let userText = """
+        Extract event details from this social media post.
+
+        URL: \(urlString)
+        \(captionBlock)
+
+        \(locationContext)
+        """
+
+        let requestBody: [String: Any] = [
+            "model": Self.extractionModel,
+            "max_tokens": 2048,
+            "modality": "social",
             "system": systemPrompt,
             "tools": [Self.webSearchTool(maxUses: 5)],
             "messages": [
@@ -292,7 +409,7 @@ enum ClaudeAPIService {
         sourceURL: String?,
         location: CLLocationCoordinate2D?,
         language: String = "English"
-    ) async throws -> EventDetails {
+    ) async throws -> ExtractionOutput {
         let locationContext: String
         if let loc = location {
             locationContext = """
@@ -313,7 +430,8 @@ enum ClaudeAPIService {
         If you cannot determine the date, set start_datetime to null — do NOT default to today. \
         Include the direct event page URL in the description.
 
-        Respond with ONLY a JSON object, no markdown fences. Schema:
+        CRITICAL: Your final response MUST be ONLY a valid JSON object — no explanations, \
+        no markdown, no commentary before or after the JSON. Schema:
         {
           "title": "Event title",
           "start_datetime": "ISO 8601 or date-only",
@@ -325,7 +443,9 @@ enum ClaudeAPIService {
           "is_multi_day": false,
           "event_dates": []
         }
-        Set null for unknown fields. For is_multi_day events, list dates in event_dates array.
+        Set null for unknown fields. For is_multi_day events, list dates in event_dates array. \
+        If you cannot find sufficient event details, respond with a JSON object \
+        where all fields are null (title: null, start_datetime: null, etc.).
 
         OUTPUT LANGUAGE: Write the "description" field in \(language). \
         Keep the title, venue, and address in their original language.
@@ -345,8 +465,9 @@ enum ClaudeAPIService {
         """
 
         let requestBody: [String: Any] = [
-            "model": "claude-haiku-4-5",
+            "model": Self.extractionModel,
             "max_tokens": 2048,
+            "modality": "text",
             "system": systemPrompt,
             "tools": [Self.webSearchTool(maxUses: 3)],
             "messages": [
@@ -362,8 +483,8 @@ enum ClaudeAPIService {
 
     // MARK: - Shared request logic
 
-    private static func sendRequestMultiple(_ requestBody: [String: Any]) async throws -> [EventDetails] {
-        let rawText = try await sendRequestRaw(requestBody)
+    private static func sendRequestMultiple(_ requestBody: [String: Any]) async throws -> ExtractionOutput {
+        let (rawText, usage) = try await sendRequestRaw(requestBody)
 
         // Detect if response is an array or single object
         let stripped = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -379,7 +500,7 @@ enum ClaudeAPIService {
                     let dtos = try JSONDecoder().decode([EventDetailsDTO].self, from: data)
                     let events = dtos.map { $0.toEventDetails() }
                         .filter { $0.title != "Untitled Event" || $0.hasExplicitDate }
-                    if !events.isEmpty { return events }
+                    if !events.isEmpty { return ExtractionOutput(events: events, usage: usage) }
                 } catch {
                     SharedContainerService.writeDebugLog("Array decode failed, trying single: \(error.localizedDescription)")
                 }
@@ -388,6 +509,13 @@ enum ClaudeAPIService {
 
         // Fall back to single object
         let objectJSON = extractJSON(from: rawText)
+
+        // If no JSON object found, Claude responded with prose
+        if !objectJSON.contains("{") {
+            SharedContainerService.writeDebugLog("API: no JSON object in response — narrative text detected (multi)")
+            throw ClaudeAPIError.noEventFound
+        }
+
         guard let data = objectJSON.data(using: .utf8) else {
             throw ClaudeAPIError.decodingFailed("Could not convert response to data")
         }
@@ -397,7 +525,7 @@ enum ClaudeAPIService {
             if dto.title == nil && dto.venue == nil && dto.startDatetime == nil {
                 throw ClaudeAPIError.noEventFound
             }
-            return [dto.toEventDetails()]
+            return ExtractionOutput(events: [dto.toEventDetails()], usage: usage)
         } catch let error as ClaudeAPIError {
             throw error
         } catch {
@@ -405,21 +533,24 @@ enum ClaudeAPIService {
             if recovered != objectJSON, let recoveredData = recovered.data(using: .utf8),
                let dto = try? JSONDecoder().decode(EventDetailsDTO.self, from: recoveredData) {
                 SharedContainerService.writeDebugLog("JSON recovered from truncation (multi)")
-                return [dto.toEventDetails()]
+                return ExtractionOutput(events: [dto.toEventDetails()], usage: usage)
             }
             SharedContainerService.writeDebugLog("JSON decode failed (multi). Raw: \(objectJSON.prefix(500))")
             throw ClaudeAPIError.decodingFailed(error.localizedDescription)
         }
     }
 
-    /// Sends the extraction request via the Worker proxy and returns raw text from Claude's response.
-    private static func sendRequestRaw(_ requestBody: [String: Any]) async throws -> String {
+    /// Sends the extraction request via the Worker proxy and returns raw text + usage from the response.
+    private static func sendRequestRaw(_ requestBody: [String: Any]) async throws -> (String, ClaudeResponse.Usage?) {
         guard let token = await WorkerAuthService.accessToken() else {
             SharedContainerService.writeDebugLog("API: auth failed — could not obtain JWT")
             throw ClaudeAPIError.authFailed
         }
 
         let bodyData = try JSONSerialization.data(withJSONObject: requestBody)
+        let model = requestBody["model"] as? String ?? "unknown"
+        let maxTokens = requestBody["max_tokens"] as? Int ?? 0
+        SharedContainerService.writeDebugLog("API: request model=\(model), max_tokens=\(maxTokens), body=\(bodyData.count) bytes")
         let (data, httpResponse) = try await executeExtractRequest(bodyData: bodyData, token: token)
 
         // On 401, refresh the token once and retry
@@ -462,7 +593,7 @@ enum ClaudeAPIService {
         return (data, httpResponse)
     }
 
-    private static func parseClaudeResponse(data: Data, httpResponse: HTTPURLResponse) throws -> String {
+    private static func parseClaudeResponse(data: Data, httpResponse: HTTPURLResponse) throws -> (String, ClaudeResponse.Usage?) {
         SharedContainerService.writeDebugLog("API: HTTP \(httpResponse.statusCode), response \(data.count) bytes")
 
         guard httpResponse.statusCode == 200 else {
@@ -472,6 +603,13 @@ enum ClaudeAPIService {
         }
 
         let claudeResponse = try JSONDecoder().decode(ClaudeResponse.self, from: data)
+        let blockTypes = claudeResponse.content.map { $0.type }
+        SharedContainerService.writeDebugLog("API: stop_reason=\(claudeResponse.stopReason ?? "nil"), content blocks: \(blockTypes)")
+
+        if let usage = claudeResponse.usage {
+            SharedContainerService.writeDebugLog("API: tokens — input: \(usage.inputTokens), output: \(usage.outputTokens), total: \(usage.totalTokens)")
+        }
+
         let allText = claudeResponse.content
             .filter { $0.type == "text" }
             .compactMap(\.text)
@@ -481,13 +619,20 @@ enum ClaudeAPIService {
         }
         let jsonString = allText.joined()
 
-        SharedContainerService.writeDebugLog("API: extracted text (\(jsonString.count) chars)")
-        return jsonString
+        SharedContainerService.writeDebugLog("API: response JSON (\(jsonString.count) chars): \(String(jsonString.prefix(1000)))")
+        return (jsonString, claudeResponse.usage)
     }
 
-    private static func sendRequest(_ requestBody: [String: Any]) async throws -> EventDetails {
-        let rawText = try await sendRequestRaw(requestBody)
+    private static func sendRequest(_ requestBody: [String: Any]) async throws -> ExtractionOutput {
+        let (rawText, usage) = try await sendRequestRaw(requestBody)
         let cleanJSON = extractJSON(from: rawText)
+
+        // If no JSON object found, Claude responded with prose — treat as no event found
+        if !cleanJSON.contains("{") {
+            SharedContainerService.writeDebugLog("API: no JSON object in response — narrative text detected")
+            throw ClaudeAPIError.noEventFound
+        }
+
         guard let jsonData = cleanJSON.data(using: .utf8) else {
             throw ClaudeAPIError.decodingFailed("Could not convert response to data")
         }
@@ -497,7 +642,7 @@ enum ClaudeAPIService {
             if dto.title == nil && dto.venue == nil && dto.startDatetime == nil {
                 throw ClaudeAPIError.noEventFound
             }
-            return dto.toEventDetails()
+            return ExtractionOutput(events: [dto.toEventDetails()], usage: usage)
         } catch let error as ClaudeAPIError {
             throw error
         } catch {
@@ -506,7 +651,7 @@ enum ClaudeAPIService {
             if recovered != cleanJSON, let recoveredData = recovered.data(using: .utf8),
                let dto = try? JSONDecoder().decode(EventDetailsDTO.self, from: recoveredData) {
                 SharedContainerService.writeDebugLog("JSON recovered from truncation")
-                return dto.toEventDetails()
+                return ExtractionOutput(events: [dto.toEventDetails()], usage: usage)
             }
             SharedContainerService.writeDebugLog("JSON decode failed. Raw: \(cleanJSON.prefix(500))")
             throw ClaudeAPIError.decodingFailed(error.localizedDescription)
@@ -655,9 +800,34 @@ enum ClaudeAPIService {
 
 struct ClaudeResponse: Decodable {
     let content: [ContentBlock]
+    let stopReason: String?
+    let usage: Usage?
+
+    enum CodingKeys: String, CodingKey {
+        case content
+        case stopReason = "stop_reason"
+        case usage
+    }
 
     struct ContentBlock: Decodable {
         let type: String
         let text: String?
     }
+
+    struct Usage: Decodable {
+        let inputTokens: Int
+        let outputTokens: Int
+
+        enum CodingKeys: String, CodingKey {
+            case inputTokens = "input_tokens"
+            case outputTokens = "output_tokens"
+        }
+
+        var totalTokens: Int { inputTokens + outputTokens }
+    }
+}
+
+struct ExtractionOutput {
+    let events: [EventDetails]
+    let usage: ClaudeResponse.Usage?
 }

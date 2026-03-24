@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import MessageUI
 
 struct EventListView: View {
     @Environment(\.modelContext) private var modelContext
@@ -10,14 +11,18 @@ struct EventListView: View {
     @State private var showCamera = false
     @State private var hasAppeared = false
     @State private var showLibrary = false
-    @State private var showSettings = false
     @State private var selectedTab: Tab = .pending
+    @State private var slideDirection: Edge = .trailing
     @State private var correctionEvent: PersistedEvent?
     @State private var expandedMonths: Set<String> = []
+    @State private var showFeedbackPrompt = false
+    @State private var showFeedbackSheet = false
+    @State private var screenshotData: Data?
 
     enum Tab: String, CaseIterable {
         case pending = "Pending"
-        case processed = "Processed"
+        case saved = "Saved"
+        case settings = "Settings"
     }
 
     private var pendingEvents: [PersistedEvent] {
@@ -69,36 +74,47 @@ struct EventListView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Top: app branding + action buttons
-                topSection
+                // Top: app branding + action buttons (event tabs only)
+                if selectedTab != .settings {
+                    topSection
+                }
 
                 // Tab content
                 Group {
                     switch selectedTab {
                     case .pending:
                         pendingList
-                    case .processed:
+                    case .saved:
                         processedList
+                    case .settings:
+                        SettingsFormContent()
                     }
                 }
+                .id(selectedTab)
+                .transition(.asymmetric(
+                    insertion: .move(edge: slideDirection),
+                    removal: .move(edge: slideDirection == .trailing ? .leading : .trailing)
+                ))
                 .frame(maxHeight: .infinity)
+                .gesture(
+                    selectedTab == .settings ? nil :
+                    DragGesture(minimumDistance: 50, coordinateSpace: .local)
+                        .onEnded { value in
+                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                            if value.translation.width < -50 && selectedTab == .pending {
+                                slideDirection = .trailing
+                                withAnimation(.easeInOut(duration: 0.25)) { selectedTab = .saved }
+                            } else if value.translation.width > 50 && selectedTab == .saved {
+                                slideDirection = .leading
+                                withAnimation(.easeInOut(duration: 0.25)) { selectedTab = .pending }
+                            }
+                        }
+                )
 
                 // Bottom: tab bar
                 tabBar
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                }
-            }
-            .sheet(isPresented: $showSettings) {
-                SettingsView()
-            }
             .fullScreenCover(isPresented: $showCamera) {
                 ZStack(alignment: .topLeading) {
                     ImagePicker(sourceType: .camera) { image in
@@ -157,6 +173,31 @@ struct EventListView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.eventsnap.pendingSharesAvailable"))) { _ in
             consumePendingShares()
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.userDidTakeScreenshotNotification)) { _ in
+            guard FeedbackService.isTestFlight else { return }
+            screenshotData = FeedbackService.captureScreenshot()
+            showFeedbackPrompt = true
+        }
+        .alert("Send Feedback?", isPresented: $showFeedbackPrompt) {
+            Button("Send Feedback") {
+                if MFMailComposeViewController.canSendMail() {
+                    showFeedbackSheet = true
+                }
+            }
+            Button("Not Now", role: .cancel) {
+                screenshotData = nil
+            }
+        } message: {
+            Text("Would you like to send feedback about what you see? Your screenshot will be attached.")
+        }
+        .sheet(isPresented: $showFeedbackSheet) {
+            FeedbackMailView(screenshotData: screenshotData) { didSend, _ in
+                if didSend {
+                    FeedbackService.logFeedback(messagePreview: "(sent via screenshot)", hadScreenshot: screenshotData != nil)
+                }
+                screenshotData = nil
+            }
+        }
     }
 
     // MARK: - Top section
@@ -193,13 +234,19 @@ struct EventListView: View {
         HStack(spacing: 0) {
             ForEach(Tab.allCases, id: \.self) { tab in
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    guard tab != selectedTab else { return }
+                    let tabIndex = Tab.allCases.firstIndex(of: tab)!
+                    let currentIndex = Tab.allCases.firstIndex(of: selectedTab)!
+                    slideDirection = tabIndex > currentIndex ? .trailing : .leading
+                    withAnimation(.easeInOut(duration: 0.25)) {
                         selectedTab = tab
                     }
                 } label: {
                     VStack(spacing: 4) {
-                        Image(systemName: tab == .pending ? "tray.full" : "checkmark.circle")
+                        Image(systemName: tabIcon(for: tab))
                             .font(.title3)
+                            .scaleEffect(selectedTab == tab ? 1.0 : 0.9)
+                            .animation(.easeInOut(duration: 0.2), value: selectedTab)
                         Text(tab.rawValue)
                             .font(.caption)
                     }
@@ -211,6 +258,14 @@ struct EventListView: View {
         }
         .padding(.bottom, 4)
         .background(.bar)
+    }
+
+    private func tabIcon(for tab: Tab) -> String {
+        switch tab {
+        case .pending: "tray.full"
+        case .saved: "checkmark.circle"
+        case .settings: "gearshape"
+        }
     }
 
     // MARK: - Pending list
@@ -407,23 +462,31 @@ private struct DateCorrectionSheet: View {
 
     @State private var startDate: Date = Date()
     @State private var endDate: Date = Date()
+    @State private var timingChoice: TimingChoice = .specificTime
+
+    private enum TimingChoice: String, CaseIterable {
+        case allDay = "All Day"
+        case specificTime = "Specific Time"
+    }
 
     private var needsDate: Bool { !event.hasExplicitDate }
     private var needsTime: Bool { !event.hasExplicitTime && !event.isAllDay }
 
-    private var pickerComponents: DatePickerComponents {
-        if needsDate && needsTime { return [.date, .hourAndMinute] }
+    private var datePickerComponents: DatePickerComponents {
+        if needsDate && needsTime && timingChoice == .specificTime {
+            return [.date, .hourAndMinute]
+        }
         if needsDate { return .date }
         return .hourAndMinute
     }
 
     private var headerText: String {
         if needsDate && needsTime {
-            return "Enter the date and time"
+            return "Set the date and timing"
         } else if needsDate {
             return "Enter the date"
         } else {
-            return "Enter the time"
+            return "Set the event timing"
         }
     }
 
@@ -440,9 +503,35 @@ private struct DateCorrectionSheet: View {
                     }
                 }
 
-                Section(headerText) {
-                    DatePicker("Start", selection: $startDate, displayedComponents: pickerComponents)
-                    DatePicker("End", selection: $endDate, displayedComponents: pickerComponents)
+                if needsTime {
+                    Section {
+                        Picker("Timing", selection: $timingChoice) {
+                            ForEach(TimingChoice.allCases, id: \.self) { choice in
+                                Text(choice.rawValue).tag(choice)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+
+                        if timingChoice == .allDay {
+                            Text("If you don't know the timing, create an All-Day event.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                if timingChoice == .allDay && !needsDate {
+                    // All day chosen, date already known — no pickers needed
+                } else if timingChoice == .allDay && needsDate {
+                    Section("Enter the date") {
+                        DatePicker("Date", selection: $startDate, displayedComponents: .date)
+                    }
+                } else {
+                    Section(needsDate ? "Enter the date and time" : "Enter the time") {
+                        DatePicker("Start", selection: $startDate, displayedComponents: datePickerComponents)
+                        DatePicker("End", selection: $endDate, displayedComponents: datePickerComponents)
+                    }
                 }
 
                 Section {
@@ -491,8 +580,15 @@ private struct DateCorrectionSheet: View {
     }
 
     private func applyCorrection() {
-        if needsDate && !needsTime {
-            let calendar = Calendar.current
+        let calendar = Calendar.current
+
+        if timingChoice == .allDay {
+            // All-day event: set start to beginning of day, end to end of day
+            let day = needsDate ? startDate : event.startDate
+            event.startDate = calendar.startOfDay(for: day)
+            event.endDate = calendar.startOfDay(for: day).addingTimeInterval(86399)
+            event.isAllDay = true
+        } else if needsDate && !needsTime {
             let dateComponents = calendar.dateComponents([.year, .month, .day], from: startDate)
             let timeComponents = calendar.dateComponents([.hour, .minute, .second], from: event.startDate)
             var merged = DateComponents()
@@ -523,7 +619,6 @@ private struct DateCorrectionSheet: View {
                 event.endDate = endDate
             }
         } else if needsTime && !needsDate {
-            let calendar = Calendar.current
             let dateComponents = calendar.dateComponents([.year, .month, .day], from: event.startDate)
             let timeComponents = calendar.dateComponents([.hour, .minute, .second], from: startDate)
             var merged = DateComponents()

@@ -30,7 +30,7 @@ struct EventDetailView: View {
 
     private var isMultiDay: Bool {
         guard let event else { return false }
-        return event.isAllDay && event.eventDates.count > 1
+        return event.eventDates.count > 1
     }
 
     private var eventCount: Int {
@@ -172,6 +172,13 @@ struct EventDetailView: View {
                     .disabled(isMultiDay && multiDayMode == .selectDays && selectedDateIndices.isEmpty)
                 }
 
+                if isMultiDay && multiDayMode == .selectDays && selectedDateIndices.count >= 5 {
+                    Text("Tip: Use \"Export .ics\" below to add all \(selectedDateIndices.count) events in one step.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .listRowBackground(Color.clear)
+                }
+
                 if event.status == .ready || event.status == .added {
                     Button {
                         let details = buildEventDetails(from: event)
@@ -283,8 +290,13 @@ struct EventDetailView: View {
                                 }
                             } label: {
                                 HStack {
-                                    Text(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
-                                        .foregroundStyle(.primary)
+                                    if event.isAllDay {
+                                        Text(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                                            .foregroundStyle(.primary)
+                                    } else {
+                                        Text(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
+                                            .foregroundStyle(.primary)
+                                    }
                                     Spacer()
                                     if selectedDateIndices.contains(index) {
                                         Image(systemName: "checkmark")
@@ -297,18 +309,24 @@ struct EventDetailView: View {
                         }
                     }
                 } else {
+                    let dates = parsedEventDates(event)
+                    let spanStart = dates.min() ?? event.startDate
+                    let spanEnd = dates.max() ?? event.endDate
                     HStack {
                         Text("Start")
                         Spacer()
-                        Text(event.startDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                        Text(spanStart.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
                             .foregroundStyle(.secondary)
                     }
                     HStack {
                         Text("End")
                         Spacer()
-                        Text(event.endDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                        Text(spanEnd.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
                             .foregroundStyle(.secondary)
                     }
+                    Text("Creates an all-day event spanning the full date range.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .onAppear {
@@ -351,30 +369,67 @@ struct EventDetailView: View {
     // MARK: - Helpers
 
     private func parsedEventDates(_ event: PersistedEvent) -> [Date] {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        if let tz = event.timezone { formatter.timeZone = TimeZone(identifier: tz) }
+        let tz = event.timezone.flatMap { TimeZone(identifier: $0) } ?? .current
 
-        return event.eventDates.compactMap { formatter.date(from: $0) }
+        let datetimeFormatter = DateFormatter()
+        datetimeFormatter.locale = Locale(identifier: "en_US_POSIX")
+        datetimeFormatter.timeZone = tz
+
+        let dateOnlyFormatter = DateFormatter()
+        dateOnlyFormatter.dateFormat = "yyyy-MM-dd"
+        dateOnlyFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateOnlyFormatter.timeZone = tz
+
+        let datetimeFormats = ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm"]
+
+        return event.eventDates.compactMap { dateString in
+            for format in datetimeFormats {
+                datetimeFormatter.dateFormat = format
+                if let date = datetimeFormatter.date(from: dateString) { return date }
+            }
+            return dateOnlyFormatter.date(from: dateString)
+        }
     }
 
     private func buildEventDetails(from event: PersistedEvent) -> [EventDetails] {
         if isMultiDay && multiDayMode == .selectDays {
             let dates = parsedEventDates(event)
+            let duration = event.endDate.timeIntervalSince(event.startDate)
+
             return selectedDateIndices.sorted().compactMap { index -> EventDetails? in
                 guard index < dates.count else { return nil }
+                let start = dates[index]
+                let end = event.isAllDay ? start : start.addingTimeInterval(duration)
                 return EventDetails(
                     title: event.title,
-                    startDate: dates[index],
-                    endDate: dates[index],
+                    startDate: start,
+                    endDate: end,
                     venue: event.venue,
                     address: event.address,
                     eventDescription: event.eventDescription,
                     timezone: event.timezone,
-                    isAllDay: true
+                    isAllDay: event.isAllDay
                 )
             }
+        } else if isMultiDay {
+            // Full Event mode: create all-day spanning event from eventDates range
+            let dates = parsedEventDates(event)
+            guard let earliest = dates.min(), let latest = dates.max() else {
+                return [event.toEventDetails()]
+            }
+            let cal = Calendar.current
+            let spanStart = cal.startOfDay(for: earliest)
+            let spanEnd = cal.startOfDay(for: latest)
+            return [EventDetails(
+                title: event.title,
+                startDate: spanStart,
+                endDate: spanEnd,
+                venue: event.venue,
+                address: event.address,
+                eventDescription: event.eventDescription,
+                timezone: event.timezone,
+                isAllDay: true
+            )]
         } else {
             return [event.toEventDetails()]
         }

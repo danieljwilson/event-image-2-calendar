@@ -5,7 +5,7 @@ Status of Event Snap features and the path to a production-ready App Store relea
 ## Completed
 
 ### Core Functionality
-- [x] Event extraction from poster photos via Claude vision API
+- [x] Event extraction from poster photos via LLM vision API (multi-provider)
 - [x] Structured prompt with cultural event detection (vernissage, festival, apéro, etc.)
 - [x] SwiftData persistence with event lifecycle (processing → ready → added/dismissed)
 - [x] Background processing via `UIApplication.beginBackgroundTask`
@@ -16,6 +16,7 @@ Status of Event Snap features and the path to a production-ready App Store relea
 - [x] ICS file export via share sheet
 - [x] All-day event support (correct yyyyMMdd format, exclusive end dates)
 - [x] Multi-day event support with multi-date selection and full-range options
+- [x] Timed multi-day events: recurring performances (ballet, concerts) grouped as single event with date selection, preserving performance times
 - [x] URL auto-linking in event descriptions
 
 ### Share Extension
@@ -30,9 +31,11 @@ Status of Event Snap features and the path to a production-ready App Store relea
 - [x] Image→URL extraction fallback for shares with poor preview images (Instagram, etc.)
 - [x] Substantive text filtering: skip non-content share text (short boilerplate, bare URLs) in URL extraction path
 - [x] Source-aware error messages (image/link/share/text) based on available extraction sources
+- [x] Social media extraction (Instagram, Facebook): adaptive text threshold (15 chars for social, 50 for regular) + dedicated social-aware prompt that uses caption text and web search to find events indirectly when pages are auth-walled
+- [x] Social media OG metadata prefetch: fetch `og:title`, `og:description`, `og:image` from Instagram/Facebook URLs using Facebook crawler UA, then route through vision or text extraction with full context
 
 ### Extraction Quality
-- [x] Claude native web search tool (`web_search_20250305`) for verifying/completing event details in a single API call
+- [x] LLM web search tool for verifying/completing event details in a single API call (Claude `web_search_20250305` / OpenAI `web_search`)
 - [x] User location context (timezone + country) for localized web search results
 - [x] Missing date handling: events without determinable dates flagged as failed with user-editable date pickers
 - [x] Strengthened prompts requiring `start_datetime` populated from visible times (not just description)
@@ -65,6 +68,7 @@ Status of Event Snap features and the path to a production-ready App Store relea
 ### Infrastructure
 - [x] XcodeGen project generation
 - [x] CI pipeline: worker typecheck + tests, iOS simulator build, gitleaks
+- [x] Multi-provider LLM extraction: Worker translation layer (`providers.ts`) auto-routes by model prefix — `gpt-*` → OpenAI Responses API, `claude-*` → Anthropic Messages API. Currently testing GPT-5 nano (`gpt-5-nano-2025-08-07`); fallback: GPT-5.4 nano (`gpt-5.4-nano-2026-03-17`) or Claude Haiku 4.5. One-line switch via `extractionModel` constant in `ClaudeAPIService.swift`.
 
 ---
 
@@ -77,7 +81,7 @@ Priority: **Critical** — must be complete before any public beta or App Store 
 - [x] Remove `CLAUDE_API_KEY` from the app bundle / `Info.plist`
 - [x] Keep Anthropic credentials server-side only (Wrangler secret)
 - [x] Apply request size limits (2MB body, model allowlist, max_tokens cap) and extraction quotas (50/device/hour, 10/IP/minute)
-- [ ] Add cost/budget monitoring for Claude usage
+- [x] Add cost/budget monitoring for LLM usage — Worker captures token usage + cost per extraction, stores per-device and global aggregates in KV, iOS displays in Settings via `GET /usage`
 
 ### Environment separation
 - [ ] Create distinct Cloudflare Worker environments for `dev`, `staging`, and `production`
@@ -126,12 +130,15 @@ Priority: **High** — prerequisite for reliable daily use.
 - [ ] End-to-end device testing of Share Extension (images from Photos, URLs from Safari/Instagram)
 - [ ] End-to-end testing of multi-day event flow (single day selection + full range)
 - [ ] Manual QA matrix covering Photos, Camera, Safari, Instagram, Eventbrite, and plain-text shares
-- [x] Onboarding flow (7-page walkthrough: features, permissions with system prompts, digest email setup, final)
+- [x] Onboarding flow (7-page App Store, 9-page TestFlight: features, permissions, digest toggle, error feedback, thank you)
+- [x] Onboarding polish: progress bar, navigation chevrons, consistent layout, keyboard dismissal, reactive permission status, digest toggle with conditional email field
 - [x] TestFlight build uploaded + App Store Connect record created
+- [x] In-app feedback: Settings row + screenshot-triggered prompt via MFMailComposeViewController, with local feedback log
 - [ ] TestFlight beta cycle with external testers and bug triage
 - [ ] Minimal iOS automated tests for calendar formatting, event parsing, and persistence recovery
 - [ ] Basic UI smoke test for the happy-path extraction flow
 - [x] Client crash reporting via MetricKit (`CrashReportingService`) + improved debug logging in Share Extension and BackgroundEventProcessor
+- [x] Debug log viewer in Settings > Diagnostics for viewing Share Extension and extraction logs
 - [x] Graceful error handling for network failures and API errors
 - [x] Loading indicators during extraction
 - [x] Retry logic for transient failures (with backoff)
@@ -201,6 +208,15 @@ Priority: **Medium** — final steps for App Store submission.
 - [ ] Remove device-only auth fallback paths
 - [ ] Remove feature flags after full enforcement
 - [ ] Dependency update automation
+
+## Meta oEmbed API Migration
+
+Priority: **Low** — current OG tag scraping works; oEmbed is the proper long-term approach.
+
+- [ ] Create Meta app and request "Meta oEmbed Read" app review approval
+- [ ] Store Meta app access token in Worker secrets
+- [ ] Migrate social media metadata fetch from OG tag scraping to Meta oEmbed API (`GET /v25.0/instagram_oembed` / `/oembed_post`) — returns structured caption HTML, author name, thumbnail URL
+- [ ] Remove client-side OG fetch in favor of Worker-side oEmbed call (keeps secrets server-side)
 
 ## Deferred Infrastructure Escalation
 

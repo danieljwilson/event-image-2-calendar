@@ -94,7 +94,11 @@ class ShareViewController: UIViewController {
             }
 
             // Single save: pass both image and URL when both are available
-            SharedContainerService.writeDebugLog("Results: image=\(collectedImageData != nil), url=\(savedURL ?? "nil"), text=\(savedText != nil)")
+            SharedContainerService.writeDebugLog(
+                "Saving: image=\(collectedImageData?.count ?? 0) bytes, " +
+                "url=\(savedURL?.prefix(100) ?? "nil"), " +
+                "text=\(savedText.map { "\($0.count) chars: \(String($0.prefix(200)))" } ?? "nil")"
+            )
             var didSave = false
             if let imageData = collectedImageData {
                 do {

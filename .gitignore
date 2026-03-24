@@ -15,6 +15,7 @@ xcuserdata/
 
 # Secrets
 Secrets.xcconfig
+.env
 
 # macOS
 .DS_Store

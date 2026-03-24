@@ -6,7 +6,8 @@ compatibility_date = "2024-01-01"
 # RESEND_API_KEY - your Resend API key
 # DIGEST_EMAIL_TO - your email address
 # JWT_SIGNING_SECRET - HMAC secret for short-lived access tokens
-# CLAUDE_API_KEY - Anthropic API key for server-side extraction
+# CLAUDE_API_KEY - Anthropic API key for Claude model extraction
+# OPENAI_API_KEY - OpenAI API key for GPT model extraction
 
 [vars]
 DIGEST_EMAIL_FROM = "Event Snap Digest <daily-digest@danieljwilson.com>"
