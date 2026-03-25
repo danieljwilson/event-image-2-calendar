@@ -17,6 +17,9 @@ enum DigestService {
         let isAllDay: Bool
         let googleCalendarURL: String
         let createdAt: String
+        let category: String?
+        let city: String?
+        let eventStatus: String?
 
         init(from event: PersistedEvent) {
             let formatter = ISO8601DateFormatter()
@@ -31,6 +34,9 @@ enum DigestService {
             self.isAllDay = event.isAllDay
             self.googleCalendarURL = event.googleCalendarURL ?? ""
             self.createdAt = formatter.string(from: event.createdAt)
+            self.category = event.category
+            self.city = event.city.isEmpty ? nil : event.city
+            self.eventStatus = event.status.rawValue
         }
     }
 

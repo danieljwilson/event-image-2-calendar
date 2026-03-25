@@ -1,6 +1,6 @@
-import { ExtractionLog } from './types';
+import { ExtractionLog, StoredEventPayload } from './types';
 
-export function buildDashboardHTML(logs: ExtractionLog[], daysFilter: number): string {
+export function buildDashboardHTML(logs: ExtractionLog[], events: StoredEventPayload[], daysFilter: number): string {
   const totalExtractions = logs.length;
   const totalCost = logs.reduce((sum, l) => sum + l.totalCostUsd, 0);
   const successCount = logs.filter((l) => l.success).length;
@@ -14,6 +14,26 @@ export function buildDashboardHTML(logs: ExtractionLog[], daysFilter: number): s
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayCount = logs.filter((l) => l.timestamp.startsWith(todayStr)).length;
   const todayCost = logs.filter((l) => l.timestamp.startsWith(todayStr)).reduce((s, l) => s + l.totalCostUsd, 0);
+
+  const eventRows = events
+    .sort((a, b) => b.startDate.localeCompare(a.startDate))
+    .map((e) => {
+      const date = new Date(e.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+      const statusClass = e.eventStatus === 'added' ? 'ok' : e.eventStatus === 'failed' ? 'err' : '';
+      const statusBadge = statusClass
+        ? `<span class="badge ${statusClass}">${escapeHtml(e.eventStatus ?? 'unknown')}</span>`
+        : escapeHtml(e.eventStatus ?? 'unknown');
+      return `<tr>
+        <td>${escapeHtml(e.title)}</td>
+        <td>${escapeHtml(e.category ?? '-')}</td>
+        <td>${escapeHtml(e.city ?? '-')}</td>
+        <td>${escapeHtml(e.venue)}</td>
+        <td>${escapeHtml(date)}</td>
+        <td>${statusBadge}</td>
+        <td title="${escapeHtml(e.deviceId)}">${escapeHtml(e.deviceId.slice(0, 8))}</td>
+      </tr>`;
+    })
+    .join('\n');
 
   const rows = logs
     .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
@@ -103,6 +123,20 @@ ${
 </tr></thead>
 <tbody>
 ${rows}
+</tbody>
+</table>`
+}
+
+<h2 style="margin-top:32px; margin-bottom:16px;">Events (${events.length})</h2>
+${
+  events.length === 0
+    ? '<div class="empty">No events stored.</div>'
+    : `<table>
+<thead><tr>
+  <th>Title</th><th>Category</th><th>City</th><th>Venue</th><th>Date</th><th>Status</th><th>Device</th>
+</tr></thead>
+<tbody>
+${eventRows}
 </tbody>
 </table>`
 }

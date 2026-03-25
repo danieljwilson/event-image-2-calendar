@@ -94,6 +94,8 @@ struct SettingsFormContent: View {
 
             Section("About") {
                 LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
+                Link("Privacy Policy", destination: URL(string: "https://event-digest-worker.daniel-j-wilson-587.workers.dev/legal/privacy")!)
+                Link("Terms of Service", destination: URL(string: "https://event-digest-worker.daniel-j-wilson-587.workers.dev/legal/terms")!)
                 Button("Show Onboarding") {
                     hasSeenOnboarding = false
                 }

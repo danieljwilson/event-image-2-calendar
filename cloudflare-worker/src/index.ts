@@ -1,5 +1,6 @@
 import { buildDashboardHTML } from './dashboard';
 import { buildDigestEmail } from './email';
+import { buildPrivacyPolicyHTML, buildTermsHTML } from './legal';
 import { buildProviderRequest, calculateCost, calculateCostBreakdown, detectProvider, extractUsage, transformOpenAIResponse } from './providers';
 import { issueAccessToken, verifyAccessToken, verifyDeviceSignature } from './security';
 import { DeviceRecord, DeviceUsageRecord, Env, EventPayload, ExtractionLog, GlobalUsageRecord, StoredEventPayload, TokenUsage } from './types';
@@ -76,8 +77,20 @@ export default {
       return handleGetUsage(request, env);
     }
 
+    if (request.method === 'PUT' && url.pathname.match(/^\/events\/[^/]+\/status$/)) {
+      return handleEventStatusUpdate(request, env, url.pathname);
+    }
+
     if (request.method === 'GET' && url.pathname === '/admin/dashboard') {
       return handleDashboard(url, env);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/legal/privacy') {
+      return new Response(buildPrivacyPolicyHTML(), { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    }
+
+    if (request.method === 'GET' && url.pathname === '/legal/terms') {
+      return new Response(buildTermsHTML(), { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
     }
 
     if (request.method === 'GET' && url.pathname === '/health') {
@@ -445,6 +458,54 @@ async function handleGetUsage(request: Request, env: Env): Promise<Response> {
   );
 }
 
+async function handleEventStatusUpdate(request: Request, env: Env, pathname: string): Promise<Response> {
+  const claims = await authenticateEventRequest(request, env);
+  if (!claims) {
+    return jsonError(401, 'Unauthorized');
+  }
+
+  const segments = pathname.split('/');
+  const eventId = segments[2];
+  if (!eventId) return jsonError(400, 'Missing event ID');
+
+  const parsed = await readJSONRequest(request);
+  if ('error' in parsed) return parsed.error;
+
+  const data = parsed.data as Record<string, unknown>;
+  const status = data.status as string | undefined;
+  const VALID_STATUSES = new Set(['added', 'dismissed', 'ready', 'failed']);
+  if (!status || !VALID_STATUSES.has(status)) {
+    return jsonError(400, 'Invalid status');
+  }
+
+  // Try to find the event in pending or sent KV entries
+  const pendingKey = `${PENDING_PREFIX}${claims.device_id}:${eventId}`;
+  const sentKey = `${SENT_PREFIX}${claims.device_id}:${eventId}`;
+
+  const [pendingRaw, sentRaw] = await Promise.all([
+    env.EVENTS.get(pendingKey),
+    env.EVENTS.get(sentKey),
+  ]);
+
+  const key = pendingRaw ? pendingKey : sentRaw ? sentKey : null;
+  const raw = pendingRaw ?? sentRaw;
+
+  if (!key || !raw) {
+    return jsonError(404, 'Event not found');
+  }
+
+  const event = JSON.parse(raw) as StoredEventPayload;
+  event.eventStatus = status;
+
+  const ttl = pendingRaw ? PENDING_EVENT_TTL_SECONDS : SENT_EVENT_TTL_SECONDS;
+  await env.EVENTS.put(key, JSON.stringify(event), { expirationTtl: ttl });
+
+  return new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 async function handleDashboard(url: URL, env: Env): Promise<Response> {
   const key = url.searchParams.get('key');
   if (!key || key !== env.ADMIN_DASHBOARD_KEY) {
@@ -486,7 +547,25 @@ async function handleDashboard(url: URL, env: Env): Promise<Response> {
     cursor = result.list_complete ? undefined : result.cursor;
   } while (cursor);
 
-  let html = buildDashboardHTML(logs, days);
+  // Fetch events from pending: and sent: KV entries
+  const events: StoredEventPayload[] = [];
+  for (const prefix of [PENDING_PREFIX, SENT_PREFIX]) {
+    let eventCursor: string | undefined;
+    do {
+      const result = await env.EVENTS.list({ prefix, limit: 1000, cursor: eventCursor });
+      for (let i = 0; i < result.keys.length; i += 50) {
+        const batch = result.keys.slice(i, i + 50);
+        const values = await Promise.all(batch.map((k) => env.EVENTS.get(k.name)));
+        for (const raw of values) {
+          if (!raw) continue;
+          try { events.push(JSON.parse(raw) as StoredEventPayload); } catch { /* skip */ }
+        }
+      }
+      eventCursor = result.list_complete ? undefined : result.cursor;
+    } while (eventCursor);
+  }
+
+  let html = buildDashboardHTML(logs, events, days);
   // Replace key placeholder in filter links
   html = html.replace(/KEY_PLACEHOLDER/g, encodeURIComponent(key));
 

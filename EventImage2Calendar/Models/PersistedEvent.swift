@@ -51,6 +51,8 @@ final class PersistedEvent {
     var inputTokens: Int = 0
     var outputTokens: Int = 0
     var extractionModel: String?
+    var category: String = "other"
+    var city: String = ""
 
     static let maxRetryCount = 5
     static let stuckProcessingTimeout: TimeInterval = 300
@@ -213,6 +215,8 @@ final class PersistedEvent {
         self.hasExplicitTime = details.hasExplicitTime
         self.updatedAt = Date()
         self.googleCalendarURL = CalendarService.googleCalendarURL(for: details)?.absoluteString
+        self.category = details.category
+        self.city = details.city
         if let usage {
             self.inputTokens = usage.inputTokens
             self.outputTokens = usage.outputTokens
@@ -242,7 +246,9 @@ final class PersistedEvent {
             eventDescription: eventDescription,
             timezone: timezone,
             isAllDay: isAllDay,
-            eventDates: eventDates
+            eventDates: eventDates,
+            category: category,
+            city: city
         )
     }
 }

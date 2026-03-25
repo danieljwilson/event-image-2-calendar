@@ -157,6 +157,7 @@ struct EventDetailView: View {
                             googleCalendarURL: digestGoogleCalendarURL(for: details),
                             context: modelContext
                         )
+                        reportEventStatus(event.id.uuidString, status: "added")
                     } label: {
                         Label(
                             eventCount > 1 ? "Add \(eventCount) Events to Google Calendar" :

@@ -294,6 +294,7 @@ struct EventListView: View {
                                     event.updatedAt = Date()
                                     event.googleCalendarURL = googleCalendarURL
                                     DigestService.dequeueEvent(event, context: modelContext)
+                                    reportEventStatus(event.id.uuidString, status: "added")
                                 } label: {
                                     Label("Add", systemImage: "calendar.badge.plus")
                                 }
@@ -664,5 +665,23 @@ private struct DateCorrectionSheet: View {
 
         DigestService.queueEvent(event, context: modelContext)
         DigestService.flushPendingEvents(context: modelContext)
+    }
+}
+
+// MARK: - Analytics status reporting
+
+/// Fire-and-forget PUT to Worker to update event status in analytics.
+func reportEventStatus(_ eventId: String, status: String) {
+    Task {
+        guard let token = await WorkerAuthService.accessToken() else { return }
+        let baseURL = "https://event-digest-worker.daniel-j-wilson-587.workers.dev"
+        guard let url = URL(string: "\(baseURL)/events/\(eventId)/status") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["status": status])
+        request.timeoutInterval = 10
+        _ = try? await URLSession.shared.data(for: request)
     }
 }

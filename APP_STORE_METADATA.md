@@ -32,34 +32,18 @@ mailto:support@eventsnap.app
 
 ## Privacy Policy URL
 
-<!-- Host this content at your chosen URL before submission -->
-https://eventsnap.app/privacy
+https://event-digest-worker.daniel-j-wilson-587.workers.dev/legal/privacy
 
-## Privacy Policy (draft content to host)
+## Terms of Service URL
 
-**Event Snap Privacy Policy**
+https://event-digest-worker.daniel-j-wilson-587.workers.dev/legal/terms
 
-Last updated: March 2026
+## Privacy Policy
 
-Event Snap is designed to extract event details from photos and links you share with it. Here is how your data is handled:
+The full privacy policy is hosted at the URL above and served by the Cloudflare Worker.
+Source: `cloudflare-worker/src/legal.ts` (`buildPrivacyPolicyHTML()`).
 
-**Photos and images** you capture or share are sent to our server for AI-powered text extraction. Images are processed in memory and are not stored after extraction is complete. Images are resized (max 1024px, JPEG quality 0.7) before transmission.
-
-**Location data** (coarse, city-level) is used solely to improve extraction accuracy — helping identify the correct city and timezone for events. Location is sent with extraction requests and is not stored separately.
-
-**Event data** you accept (title, date, venue, etc.) may be sent to our server for inclusion in a daily digest email. Event data is stored temporarily (up to 30 days) and deleted after the digest is sent.
-
-**Device identity** is managed via a cryptographic key pair generated on your device. No personal information (name, email, Apple ID) is collected or linked to your device identity.
-
-**No tracking**: Event Snap does not use analytics, advertising SDKs, or tracking pixels. No data is shared with third parties for advertising or marketing purposes.
-
-**Third-party services**:
-- Anthropic (Claude API) processes images and text for event extraction
-- Resend delivers digest emails
-
-**Data deletion**: Uninstalling the app removes all local data. Server-side pending events expire automatically after 30 days.
-
-**Contact**: For privacy questions, email support@eventsnap.app.
+Also linked from: Settings > About > Privacy Policy, and the onboarding data disclosure page.
 
 ## App Store Privacy Labels
 

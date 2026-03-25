@@ -178,7 +178,9 @@ enum ClaudeAPIService {
           "is_multi_day": false,
           "event_dates": [],
           "date_confirmed": true,
-          "time_confirmed": true
+          "time_confirmed": true,
+          "category": "sports | music | arts | food | tech | business | education | community | nightlife | other",
+          "city": "City name (e.g. Nice, Paris, New York)"
         }
         Set null for unknown fields (except start_datetime). For is_multi_day events, \
         list dates in event_dates array (date-only for festivals, datetime for timed performances).
@@ -273,7 +275,9 @@ enum ClaudeAPIService {
           "description": "1-3 sentences. Include direct event page URL.",
           "timezone": "IANA timezone",
           "is_multi_day": false,
-          "event_dates": []
+          "event_dates": [],
+          "category": "sports | music | arts | food | tech | business | education | community | nightlife | other",
+          "city": "City name (e.g. Nice, Paris, New York)"
         }
         Set null for unknown fields. For is_multi_day events, list dates in event_dates array. \
         If you cannot find sufficient event details after searching, respond with a JSON object \
@@ -355,7 +359,9 @@ enum ClaudeAPIService {
           "description": "1-3 sentences. Include direct event page URL.",
           "timezone": "IANA timezone",
           "is_multi_day": false,
-          "event_dates": []
+          "event_dates": [],
+          "category": "sports | music | arts | food | tech | business | education | community | nightlife | other",
+          "city": "City name (e.g. Nice, Paris, New York)"
         }
         Set null for unknown fields. For is_multi_day events, list dates in event_dates array. \
         If you cannot find sufficient event details after searching, respond with a JSON object \
@@ -441,7 +447,9 @@ enum ClaudeAPIService {
           "description": "1-3 sentences. Include direct event page URL.",
           "timezone": "IANA timezone",
           "is_multi_day": false,
-          "event_dates": []
+          "event_dates": [],
+          "category": "sports | music | arts | food | tech | business | education | community | nightlife | other",
+          "city": "City name (e.g. Nice, Paris, New York)"
         }
         Set null for unknown fields. For is_multi_day events, list dates in event_dates array. \
         If you cannot find sufficient event details, respond with a JSON object \

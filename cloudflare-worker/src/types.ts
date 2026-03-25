@@ -10,6 +10,9 @@ export interface EventPayload {
   isAllDay: boolean;
   googleCalendarURL: string;
   createdAt: string;
+  category: string | null;
+  city: string | null;
+  eventStatus: string | null;
 }
 
 export interface StoredEventPayload extends EventPayload {

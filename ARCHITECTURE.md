@@ -361,11 +361,21 @@ The Worker captures token usage from every LLM response (both OpenAI and Anthrop
 
 **Extraction log fields:** id, timestamp, deviceId, model, provider, modality (image/url/text/social — sent by iOS in the extract request), input/output tokens, input/output/total cost, processing time (Worker-measured LLM call duration), success, error detail.
 
-**Analytics dashboard:** `GET /admin/dashboard?key=<ADMIN_DASHBOARD_KEY>` serves an HTML page with summary cards (total extractions, cost, success rate, avg time) and a detailed table of all extractions. Filterable by day range. Protected by a shared secret (`ADMIN_DASHBOARD_KEY` Wrangler secret). Not visible to app users.
+**Analytics dashboard:** `GET /admin/dashboard?key=<ADMIN_DASHBOARD_KEY>` serves an HTML page with two sections: (1) extraction log with summary cards (total extractions, cost, success rate, avg time) and per-extraction detail table, (2) events table showing title, category, city, venue, date, calendar status, and device. Filterable by day range. Protected by a shared secret (`ADMIN_DASHBOARD_KEY` Wrangler secret). Not visible to app users.
+
+**Event metadata:** Each event includes `category` (sports/music/arts/food/tech/business/education/community/nightlife/other) and `city` fields, both populated by the LLM during extraction. Calendar status (`eventStatus`) is updated via `PUT /events/{id}/status` when the user adds or dismisses events in the app.
 
 **Pricing updates:** Edit `MODEL_PRICING` in `providers.ts` and `wrangler deploy`. Aligned with the existing model-change workflow (ALLOWED_MODELS is also a code constant).
 
 **KV race condition:** Two concurrent extractions could lose an aggregate counter increment. Acceptable for a pre-release single-developer app; individual extraction logs are not affected.
+
+### Legal Pages
+
+The Worker serves public legal pages (no auth required):
+- `GET /legal/privacy` — Privacy Policy HTML
+- `GET /legal/terms` — Terms of Service HTML
+
+Source: `cloudflare-worker/src/legal.ts`. Linked from iOS Settings (About section) and the onboarding data disclosure page. These URLs are used as the App Store privacy policy and terms URLs.
 
 ### Environments
 

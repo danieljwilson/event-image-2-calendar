@@ -13,6 +13,8 @@ class EventDetails {
     var eventDates: [String]
     var hasExplicitDate: Bool
     var hasExplicitTime: Bool
+    var category: String
+    var city: String
 
     init(
         title: String = "",
@@ -25,7 +27,9 @@ class EventDetails {
         isAllDay: Bool = false,
         eventDates: [String] = [],
         hasExplicitDate: Bool = true,
-        hasExplicitTime: Bool = true
+        hasExplicitTime: Bool = true,
+        category: String = "other",
+        city: String = ""
     ) {
         self.title = title
         self.startDate = startDate
@@ -38,6 +42,8 @@ class EventDetails {
         self.eventDates = eventDates
         self.hasExplicitDate = hasExplicitDate
         self.hasExplicitTime = hasExplicitTime
+        self.category = category
+        self.city = city
     }
 }
 
@@ -55,6 +61,8 @@ struct EventDetailsDTO: Decodable {
     let eventDates: [String]?
     let dateConfirmed: Bool?
     let timeConfirmed: Bool?
+    let category: String?
+    let city: String?
 
     enum CodingKeys: String, CodingKey {
         case title
@@ -68,6 +76,8 @@ struct EventDetailsDTO: Decodable {
         case eventDates = "event_dates"
         case dateConfirmed = "date_confirmed"
         case timeConfirmed = "time_confirmed"
+        case category
+        case city
     }
 
     func toEventDetails() -> EventDetails {
@@ -97,7 +107,9 @@ struct EventDetailsDTO: Decodable {
             isAllDay: isMulti && !Self.hasTimeComponent(startDatetime),
             eventDates: eventDates ?? [],
             hasExplicitDate: hasDate,
-            hasExplicitTime: hasTime
+            hasExplicitTime: hasTime,
+            category: category ?? "other",
+            city: city ?? ""
         )
     }
 

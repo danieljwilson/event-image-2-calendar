@@ -102,6 +102,10 @@ export function validateEventPayload(input: unknown): EventPayload | null {
 
   if (end < start) return null;
 
+  const category = asString(input.category) ?? null;
+  const city = asString(input.city) ?? null;
+  const eventStatus = asString(input.eventStatus) ?? null;
+
   return {
     id,
     title,
@@ -114,6 +118,9 @@ export function validateEventPayload(input: unknown): EventPayload | null {
     isAllDay,
     googleCalendarURL,
     createdAt,
+    category,
+    city,
+    eventStatus,
   };
 }
 
