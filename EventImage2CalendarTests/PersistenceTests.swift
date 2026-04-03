@@ -279,7 +279,7 @@ final class PersistenceTests: XCTestCase {
             hasExplicitTime: true
         )
 
-        let usage = ClaudeResponse.Usage(inputTokens: 1500, outputTokens: 300)
+        let usage = ExtractionResponse.Usage(inputTokens: 1500, outputTokens: 300)
         event.applyExtraction(details, usage: usage)
 
         XCTAssertEqual(event.inputTokens, 1500)
