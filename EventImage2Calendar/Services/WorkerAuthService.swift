@@ -31,6 +31,44 @@ enum WorkerAuthService {
         let digestEmail: String?
     }
 
+    struct ErrorReport: Encodable {
+        let eventId: String
+        let errorType: String
+        let errorMessage: String
+        let sourceType: String
+        let imageSizeBytes: Int?
+        let attemptCount: Int
+        let elapsedSeconds: Double
+        let isRetryable: Bool
+        let appVersion: String
+        let buildNumber: String
+        let deviceModel: String
+        let iOSVersion: String
+    }
+
+    /// Fire-and-forget: report a client-side extraction error to the Worker for dashboard visibility.
+    static func reportError(_ report: ErrorReport) {
+        Task {
+            guard let token = await accessToken() else { return }
+
+            let endpoint = workerBaseURL.appendingPathComponent("report-error")
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.httpBody = try? JSONEncoder().encode(report)
+            request.timeoutInterval = 15
+
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                SharedContainerService.writeDebugLog("Error report sent: HTTP \(status)")
+            } catch {
+                SharedContainerService.writeDebugLog("Error report failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     static func clearCachedToken() {
         Task { await tokenCache.clear() }
     }

@@ -1,6 +1,6 @@
-import { ExtractionLog, StoredEventPayload } from './types';
+import { ClientErrorReport, ExtractionLog, StoredEventPayload } from './types';
 
-export function buildDashboardHTML(logs: ExtractionLog[], events: StoredEventPayload[], daysFilter: number): string {
+export function buildDashboardHTML(logs: ExtractionLog[], events: StoredEventPayload[], clientErrors: ClientErrorReport[], daysFilter: number): string {
   const totalExtractions = logs.length;
   const totalCost = logs.reduce((sum, l) => sum + l.totalCostUsd, 0);
   const successCount = logs.filter((l) => l.success).length;
@@ -14,6 +14,35 @@ export function buildDashboardHTML(logs: ExtractionLog[], events: StoredEventPay
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayCount = logs.filter((l) => l.timestamp.startsWith(todayStr)).length;
   const todayCost = logs.filter((l) => l.timestamp.startsWith(todayStr)).reduce((s, l) => s + l.totalCostUsd, 0);
+
+  // Client error report stats & rows
+  const totalClientErrors = clientErrors.length;
+  const uniqueErrDevices = new Set(clientErrors.map((e) => e.deviceId)).size;
+  const errorTypeCounts = clientErrors.reduce((acc, e) => { acc[e.errorType] = (acc[e.errorType] || 0) + 1; return acc; }, {} as Record<string, number>);
+  const topErrorType = Object.entries(errorTypeCounts).sort((a, b) => b[1] - a[1])[0];
+
+  const clientErrorRows = clientErrors
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+    .map((e) => {
+      const time = new Date(e.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+      const device = e.deviceId.slice(0, 8);
+      const sizeStr = e.imageSizeBytes != null ? (e.imageSizeBytes / 1024).toFixed(0) + ' KB' : '-';
+      const retryBadge = e.isRetryable ? '<span class="badge ok">yes</span>' : '<span class="badge err">no</span>';
+      return `<tr>
+        <td>${escapeHtml(time)}</td>
+        <td title="${escapeHtml(e.deviceId)}">${escapeHtml(device)}</td>
+        <td>${escapeHtml(e.errorType)}</td>
+        <td title="${escapeHtml(e.errorMessage)}">${escapeHtml(e.errorMessage.slice(0, 60))}${e.errorMessage.length > 60 ? '...' : ''}</td>
+        <td>${escapeHtml(e.sourceType)}</td>
+        <td class="num">${sizeStr}</td>
+        <td class="num">${e.attemptCount}</td>
+        <td class="num">${e.elapsedSeconds.toFixed(1)}s</td>
+        <td>${retryBadge}</td>
+        <td>${escapeHtml(e.appVersion)} (${escapeHtml(e.buildNumber)})</td>
+        <td title="${escapeHtml(e.iOSVersion)}">${escapeHtml(e.deviceModel)}</td>
+      </tr>`;
+    })
+    .join('\n');
 
   const eventRows = events
     .sort((a, b) => b.startDate.localeCompare(a.startDate))
@@ -137,6 +166,26 @@ ${
 </tr></thead>
 <tbody>
 ${eventRows}
+</tbody>
+</table>`
+}
+
+<h2 style="margin-top:32px; margin-bottom:16px;">Client Errors (${totalClientErrors})</h2>
+${
+  totalClientErrors === 0
+    ? '<div class="empty">No client errors reported in this period.</div>'
+    : `<div class="cards" style="margin-bottom:16px">
+  <div class="card"><div class="label">Total Errors</div><div class="value">${totalClientErrors}</div></div>
+  <div class="card"><div class="label">Affected Devices</div><div class="value">${uniqueErrDevices}</div></div>
+  <div class="card"><div class="label">Top Error</div><div class="value" style="font-size:16px">${topErrorType ? escapeHtml(topErrorType[0]) : '-'}</div><div class="sub">${topErrorType ? topErrorType[1] + 'x' : ''}</div></div>
+</div>
+<table>
+<thead><tr>
+  <th>Time</th><th>Device</th><th>Error Type</th><th>Message</th><th>Source</th>
+  <th>Image Size</th><th>Attempts</th><th>Elapsed</th><th>Retryable</th><th>Version</th><th>Device Model</th>
+</tr></thead>
+<tbody>
+${clientErrorRows}
 </tbody>
 </table>`
 }

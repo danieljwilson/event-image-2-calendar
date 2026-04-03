@@ -52,7 +52,7 @@ Shared/                                   # Code shared between both targets
 cloudflare-worker/
 ├── wrangler.toml                         # Worker config + cron trigger
 ├── src/
-│   ├── index.ts                          # /auth/register + /auth/token + POST /extract + GET /usage + GET /admin/dashboard + POST /events + daily cron
+│   ├── index.ts                          # /auth/register + /auth/token + POST /extract + POST /report-error + GET /usage + GET /admin/dashboard + POST /events + daily cron
 │   ├── providers.ts                      # LLM provider detection + request/response translation + pricing + usage extraction
 │   ├── dashboard.ts                      # HTML builder for admin analytics dashboard
 │   ├── email.ts                          # HTML digest email builder

@@ -129,6 +129,8 @@ class BackgroundEventProcessor {
     ) {
         let location = locationService.currentLocation
         let language = UserDefaults.standard.string(forKey: "extractionLanguage") ?? "English"
+        let deviceModel = UIDevice.current.model
+        let iOSVersion = UIDevice.current.systemVersion
 
         var bgTaskID: UIBackgroundTaskIdentifier = .invalid
         bgTaskID = UIApplication.shared.beginBackgroundTask(withName: taskName) {
@@ -257,11 +259,57 @@ class BackgroundEventProcessor {
             )
 
             let failElapsed = CFAbsoluteTimeGetCurrent() - extractionStart
+            let isRetryable = (lastError as? ClaudeAPIError)?.isRetryable ?? false
             SharedContainerService.writeDebugLog(
                 "Extraction FAILED: event=\(eventID), elapsed=\(String(format: "%.1f", failElapsed))s, " +
-                "retryable=\((lastError as? ClaudeAPIError)?.isRetryable ?? false), " +
+                "retryable=\(isRetryable), " +
                 "error=\(String(describing: lastError)), message=\(errorMessage)"
             )
+
+            // Report error to Worker for remote dashboard visibility
+            let errorType: String
+            if let claudeError = lastError as? ClaudeAPIError {
+                switch claudeError {
+                case .authFailed: errorType = "authFailed"
+                case .invalidResponse: errorType = "invalidResponse"
+                case .apiError: errorType = "apiError"
+                case .decodingFailed: errorType = "decodingFailed"
+                case .noEventFound: errorType = "noEventFound"
+                }
+            } else if lastError is URLError {
+                errorType = "urlError"
+            } else {
+                errorType = "unknown"
+            }
+
+            let sourceType: String
+            if imageData != nil && sourceURL != nil && Self.isSocialMediaURL(sourceURL!) {
+                sourceType = "social"
+            } else if imageData != nil {
+                sourceType = "image"
+            } else if sourceURL != nil {
+                sourceType = "url"
+            } else {
+                sourceType = "text"
+            }
+
+            let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+            let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+
+            WorkerAuthService.reportError(WorkerAuthService.ErrorReport(
+                eventId: eventID.uuidString,
+                errorType: errorType,
+                errorMessage: lastError?.localizedDescription ?? "Unknown error",
+                sourceType: sourceType,
+                imageSizeBytes: imageData?.count,
+                attemptCount: maxAutoRetries,
+                elapsedSeconds: failElapsed,
+                isRetryable: isRetryable,
+                appVersion: version,
+                buildNumber: build,
+                deviceModel: deviceModel,
+                iOSVersion: iOSVersion
+            ))
 
             await MainActor.run {
                 let descriptor = FetchDescriptor<PersistedEvent>(

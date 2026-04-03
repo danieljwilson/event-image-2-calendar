@@ -361,7 +361,7 @@ The Worker captures token usage from every LLM response (both OpenAI and Anthrop
 
 **Extraction log fields:** id, timestamp, deviceId, model, provider, modality (image/url/text/social — sent by iOS in the extract request), input/output tokens, input/output/total cost, processing time (Worker-measured LLM call duration), success, error detail.
 
-**Analytics dashboard:** `GET /admin/dashboard?key=<ADMIN_DASHBOARD_KEY>` serves an HTML page with two sections: (1) extraction log with summary cards (total extractions, cost, success rate, avg time) and per-extraction detail table, (2) events table showing title, category, city, venue, date, calendar status, and device. Filterable by day range. Protected by a shared secret (`ADMIN_DASHBOARD_KEY` Wrangler secret). Not visible to app users.
+**Analytics dashboard:** `GET /admin/dashboard?key=<ADMIN_DASHBOARD_KEY>` serves an HTML page with three sections: (1) extraction log with summary cards (total extractions, cost, success rate, avg time) and per-extraction detail table, (2) events table showing title, category, city, venue, date, calendar status, and device, (3) client error reports showing errors reported by the iOS app (error type, message, source type, image size, attempt count, elapsed time, retryability, app version, device model). Filterable by day range. Protected by a shared secret (`ADMIN_DASHBOARD_KEY` Wrangler secret). Not visible to app users.
 
 **Event metadata:** Each event includes `category` (sports/music/arts/food/tech/business/education/community/nightlife/other) and `city` fields, both populated by the LLM during extraction. Calendar status (`eventStatus`) is updated via `PUT /events/{id}/status` when the user adds or dismisses events in the app.
 
@@ -457,6 +457,10 @@ The share extension runs in a separate process and does not generate MetricKit p
 2. **Screenshot-triggered prompt** — `EventListView` listens for `UIApplication.userDidTakeScreenshotNotification`, gated by `FeedbackService.isTestFlight` (sandbox receipt check). On screenshot, captures the current screen and presents an alert offering to send feedback with the screenshot attached.
 
 Every sent feedback is logged to `feedback_log.json` in the App Groups container (via `FeedbackService.logFeedback`), viewable in Settings > Diagnostics > Feedback Log.
+
+### Remote Error Reporting
+
+When extraction fails after all retries, `BackgroundEventProcessor` fires a non-blocking `POST /report-error` to the Cloudflare Worker via `WorkerAuthService.reportError()`. The report includes error type/message, source type, image size, attempt count, elapsed time, retryability, app version, build number, device model, and iOS version. Reports are stored in KV (`clienterror:{YYYY-MM-DD}:{uuid}`, 90-day TTL) and displayed in the admin dashboard's "Client Errors" section. Rate-limited to 10 reports per device per hour.
 
 ## Testing & CI
 

@@ -104,6 +104,28 @@ export interface ExtractionLog {
 }
 
 // ---------------------------------------------------------------------------
+// Client error reports
+// ---------------------------------------------------------------------------
+
+export interface ClientErrorReport {
+  id: string;
+  timestamp: string;
+  deviceId: string;
+  eventId: string;
+  errorType: string;
+  errorMessage: string;
+  sourceType: string;
+  imageSizeBytes: number | null;
+  attemptCount: number;
+  elapsedSeconds: number;
+  isRetryable: boolean;
+  appVersion: string;
+  buildNumber: string;
+  deviceModel: string;
+  iOSVersion: string;
+}
+
+// ---------------------------------------------------------------------------
 // Environment
 // ---------------------------------------------------------------------------
 

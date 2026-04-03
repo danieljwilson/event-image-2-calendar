@@ -3,7 +3,7 @@ import { buildDigestEmail } from './email';
 import { buildPrivacyPolicyHTML, buildTermsHTML } from './legal';
 import { buildProviderRequest, calculateCost, calculateCostBreakdown, detectProvider, extractUsage, transformOpenAIResponse } from './providers';
 import { issueAccessToken, verifyAccessToken, verifyDeviceSignature } from './security';
-import { DeviceRecord, DeviceUsageRecord, Env, EventPayload, ExtractionLog, GlobalUsageRecord, StoredEventPayload, TokenUsage } from './types';
+import { ClientErrorReport, DeviceRecord, DeviceUsageRecord, Env, EventPayload, ExtractionLog, GlobalUsageRecord, StoredEventPayload, TokenUsage } from './types';
 
 import {
   isFreshTimestamp,
@@ -11,6 +11,7 @@ import {
   MAX_EXTRACT_BODY_CHARS,
   readJSONRequest,
   validateDevicePreferences,
+  validateErrorReport,
   validateEventPayload,
   validateExtractRequest,
   validateIssueTokenRequest,
@@ -24,6 +25,7 @@ const RATE_LIMIT_PREFIX = 'ratelimit:';
 const USAGE_DEVICE_PREFIX = 'usage:device:';
 const USAGE_GLOBAL_KEY = 'usage:global';
 const EXTRACT_LOG_PREFIX = 'extractlog:';
+const CLIENT_ERROR_PREFIX = 'clienterror:';
 const EXTRACT_LOG_TTL_SECONDS = 60 * 60 * 24 * 90; // 90 days
 
 const DEVICE_RECORD_TTL_SECONDS = 60 * 60 * 24 * 180;
@@ -59,6 +61,10 @@ export default {
 
     if (request.method === 'POST' && url.pathname === '/extract') {
       return handleExtract(request, env);
+    }
+
+    if (request.method === 'POST' && url.pathname === '/report-error') {
+      return handleReportError(request, env);
     }
 
     if (request.method === 'POST' && url.pathname === '/events') {
@@ -290,6 +296,61 @@ async function recordExtractionLog(
 
   const key = `${EXTRACT_LOG_PREFIX}${dateStr}:${id}`;
   await env.EVENTS.put(key, JSON.stringify(log), { expirationTtl: EXTRACT_LOG_TTL_SECONDS });
+}
+
+// ---------------------------------------------------------------------------
+// Client error reporting
+// ---------------------------------------------------------------------------
+
+async function handleReportError(request: Request, env: Env): Promise<Response> {
+  const claims = await authenticateEventRequest(request, env);
+  if (!claims) {
+    return jsonError(401, 'Unauthorized');
+  }
+
+  // Rate limit: 10 error reports per device per hour
+  const limitOK = await enforceRateLimit(env, `errorreport:${claims.device_id}`, 10, 60 * 60);
+  if (!limitOK) {
+    return jsonError(429, 'Error report rate limit exceeded');
+  }
+
+  const parsed = await readJSONRequest(request);
+  if ('error' in parsed) return parsed.error;
+
+  const body = validateErrorReport(parsed.data);
+  if (!body) {
+    return jsonError(400, 'Invalid error report payload');
+  }
+
+  const id = crypto.randomUUID();
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10);
+
+  const report: ClientErrorReport = {
+    id,
+    timestamp: now.toISOString(),
+    deviceId: claims.device_id,
+    eventId: body.eventId,
+    errorType: body.errorType,
+    errorMessage: body.errorMessage,
+    sourceType: body.sourceType,
+    imageSizeBytes: body.imageSizeBytes,
+    attemptCount: body.attemptCount,
+    elapsedSeconds: body.elapsedSeconds,
+    isRetryable: body.isRetryable,
+    appVersion: body.appVersion,
+    buildNumber: body.buildNumber,
+    deviceModel: body.deviceModel,
+    iOSVersion: body.iOSVersion,
+  };
+
+  const key = `${CLIENT_ERROR_PREFIX}${dateStr}:${id}`;
+  await env.EVENTS.put(key, JSON.stringify(report), { expirationTtl: EXTRACT_LOG_TTL_SECONDS });
+
+  return new Response(JSON.stringify({ recorded: true }), {
+    status: 201,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -565,7 +626,28 @@ async function handleDashboard(url: URL, env: Env): Promise<Response> {
     } while (eventCursor);
   }
 
-  let html = buildDashboardHTML(logs, events, days);
+  // Fetch client error reports
+  const clientErrors: ClientErrorReport[] = [];
+  let errorCursor: string | undefined;
+  do {
+    const result = await env.EVENTS.list({ prefix: CLIENT_ERROR_PREFIX, limit: 1000, cursor: errorCursor });
+    for (let i = 0; i < result.keys.length; i += 50) {
+      const batch = result.keys.slice(i, i + 50);
+      const values = await Promise.all(batch.map((k) => env.EVENTS.get(k.name)));
+      for (const raw of values) {
+        if (!raw) continue;
+        try {
+          const report = JSON.parse(raw) as ClientErrorReport;
+          if (new Date(report.timestamp) >= startDate) {
+            clientErrors.push(report);
+          }
+        } catch { /* skip */ }
+      }
+    }
+    errorCursor = result.list_complete ? undefined : result.cursor;
+  } while (errorCursor);
+
+  let html = buildDashboardHTML(logs, events, clientErrors, days);
   // Replace key placeholder in filter links
   html = html.replace(/KEY_PLACEHOLDER/g, encodeURIComponent(key));
 

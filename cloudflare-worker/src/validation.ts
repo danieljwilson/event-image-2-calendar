@@ -177,6 +177,66 @@ export function validateExtractRequest(input: unknown): ExtractRequestBody | nul
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Client error report validation
+// ---------------------------------------------------------------------------
+
+const VALID_ERROR_SOURCE_TYPES = new Set(['image', 'url', 'text', 'social']);
+
+export interface ErrorReportBody {
+  eventId: string;
+  errorType: string;
+  errorMessage: string;
+  sourceType: string;
+  imageSizeBytes: number | null;
+  attemptCount: number;
+  elapsedSeconds: number;
+  isRetryable: boolean;
+  appVersion: string;
+  buildNumber: string;
+  deviceModel: string;
+  iOSVersion: string;
+}
+
+export function validateErrorReport(input: unknown): ErrorReportBody | null {
+  if (!isRecord(input)) return null;
+
+  const eventId = normalizeString(input.eventId, 1, 128);
+  const errorType = normalizeString(input.errorType, 1, 100);
+  const errorMessage = normalizeString(input.errorMessage, 1, 1000);
+  const sourceType = asString(input.sourceType);
+  const attemptCount = asNumber(input.attemptCount);
+  const elapsedSeconds = asNumber(input.elapsedSeconds);
+  const isRetryable = asBoolean(input.isRetryable);
+  const appVersion = normalizeString(input.appVersion, 1, 20);
+  const buildNumber = normalizeString(input.buildNumber, 1, 20);
+  const deviceModel = normalizeString(input.deviceModel, 1, 100);
+  const iOSVersion = normalizeString(input.iOSVersion, 1, 20);
+
+  if (!eventId || !errorType || !errorMessage || !sourceType || !appVersion || !buildNumber || !deviceModel || !iOSVersion) return null;
+  if (!VALID_ERROR_SOURCE_TYPES.has(sourceType)) return null;
+  if (attemptCount == null || attemptCount < 1 || attemptCount > 10) return null;
+  if (elapsedSeconds == null || elapsedSeconds < 0 || elapsedSeconds > 600) return null;
+  if (isRetryable == null) return null;
+
+  const imageSizeBytes = asNumber(input.imageSizeBytes) ?? null;
+
+  return {
+    eventId,
+    errorType,
+    errorMessage,
+    sourceType,
+    imageSizeBytes,
+    attemptCount,
+    elapsedSeconds,
+    isRetryable,
+    appVersion,
+    buildNumber,
+    deviceModel,
+    iOSVersion,
+  };
+}
+
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function validateDevicePreferences(input: unknown): DevicePreferencesRequest | null {

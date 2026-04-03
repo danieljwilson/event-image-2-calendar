@@ -140,6 +140,7 @@ Priority: **High** — prerequisite for reliable daily use.
 - [x] Client crash reporting via MetricKit (`CrashReportingService`) + improved debug logging in Share Extension and BackgroundEventProcessor
 - [x] Debug log viewer in Settings > Diagnostics for viewing Share Extension and extraction logs
 - [x] Graceful error handling for network failures and API errors
+- [x] Remote client error reporting: extraction failures auto-reported to Worker (`POST /report-error`) and visible on admin dashboard
 - [x] Loading indicators during extraction
 - [x] Retry logic for transient failures (with backoff)
 - [x] Edge cases: very large images (progressive JPEG quality reduction), unsupported formats, posters with no event info
