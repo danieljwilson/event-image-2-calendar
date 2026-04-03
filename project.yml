@@ -62,6 +62,7 @@ targets:
       - EventImage2CalendarTests
     settings:
       base:
+        GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.eventsnap.EventImage2CalendarTests
         DEVELOPMENT_TEAM: RZ74J65XU2
         CODE_SIGN_STYLE: Automatic
@@ -77,6 +78,7 @@ targets:
       - EventImage2CalendarUITests
     settings:
       base:
+        GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.eventsnap.EventImage2CalendarUITests
         DEVELOPMENT_TEAM: RZ74J65XU2
         CODE_SIGN_STYLE: Automatic

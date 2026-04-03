@@ -80,7 +80,7 @@ EventImage2Calendar/                      # Main app target
 │   ├── EventDetails.swift                # @Observable event model (in-memory) + DTO
 │   └── PersistedEvent.swift              # SwiftData @Model + EventStatus enum
 ├── Services/
-│   ├── ClaudeAPIService.swift            # Extraction client via Worker /extract proxy
+│   ├── ExtractionService.swift            # Extraction client via Worker /extract proxy
 │   ├── CalendarService.swift             # Google Calendar URL + .ics generation
 │   ├── BackgroundEventProcessor.swift    # Background API calls + SwiftData persistence
 │   ├── LocationService.swift             # CLLocationManager wrapper
@@ -131,7 +131,7 @@ Camera / Photo Library / Share Extension
     (UIApplication.beginBackgroundTask)
                 │
                 ▼
-        ClaudeAPIService
+        ExtractionService
     (vision extraction or URL extraction)
                 │
                 ▼
@@ -167,7 +167,7 @@ Camera / Photo Library / Share Extension
 **Status values:** `processing` → `ready` → `added` | `dismissed` | `failed`
 
 **Error handling & retry:**
-- `ClaudeAPIError` classifies errors as retryable (network, 5xx, 429, 413) or permanent (auth, decoding, no-event-found). Error messages are source-aware: "image" for pure photos, "link" for URL shares, "share" for mixed image+URL shares, "text" for text-only shares. Social media URLs (Instagram, Facebook) get a specific message suggesting image/screenshot sharing as fallback when extraction fails
+- `ExtractionError` classifies errors as retryable (network, 5xx, 429, 413) or permanent (auth, decoding, no-event-found). Error messages are source-aware: "image" for pure photos, "link" for URL shares, "share" for mixed image+URL shares, "text" for text-only shares. Social media URLs (Instagram, Facebook) get a specific message suggesting image/screenshot sharing as fallback when extraction fails
 - `performExtraction` auto-retries retryable errors up to 3 times with exponential backoff (2s, 4s, 8s)
 - Manual retry available via swipe action or detail view button, capped at 5 total attempts (`PersistedEvent.maxRetryCount`)
 - On app launch: events stuck in `.processing` for >5 min are recovered to `.failed`; failed events with retryable errors are auto-retried
@@ -204,11 +204,11 @@ All extraction modes use Claude's **`web_search_20250305`** tool, allowing the m
 
 ### Server-side proxy
 
-`ClaudeAPIService` sends all extraction requests to `POST /extract` on the Cloudflare Worker in Claude Messages API format. The Worker validates auth, enforces rate limits, detects the LLM provider from the model name (via `providers.ts`), translates the request to the target provider's format, and proxies to the correct API. For OpenAI models, the Worker uses the Responses API (`POST /v1/responses`) and translates the response back to Claude format so iOS parsing code is unchanged. API keys never leave the server.
+`ExtractionService` sends all extraction requests to `POST /extract` on the Cloudflare Worker in Claude Messages API format. The Worker validates auth, enforces rate limits, detects the LLM provider from the model name (via `providers.ts`), translates the request to the target provider's format, and proxies to the correct API. For OpenAI models, the Worker uses the Responses API (`POST /v1/responses`) and translates the response back to Claude format so iOS parsing code is unchanged. API keys never leave the server.
 
 The app authenticates via `WorkerAuthService`: on first use it registers a P-256 device key, then acquires a short-lived JWT for each extraction. On 401, the token is refreshed and the request retried once.
 
-Three extraction modes in `ClaudeAPIService`:
+Three extraction modes in `ExtractionService`:
 
 - **Image extraction** (`extractEvents` / `extractEvent`): Sends base64 JPEG + structured prompt with `web_search` tool (max 5 uses). Returns a JSON **array** of events — a single image may contain multiple distinct events at different venues/times. When the same event is performed on multiple dates (e.g., a ballet or concert series), it returns a single entry with `is_multi_day: true` and `event_dates` containing datetime strings. `extractEvent` is a convenience wrapper returning the first event only.
 - **Text extraction** (`extractEventFromText`): Sends page text content + `web_search` tool (max 3 uses). Truncates input to 4000 chars.
@@ -223,7 +223,7 @@ All three methods accept a `language` parameter (default: "English") that contro
 
 **Multi-event images:** When a poster/screenshot lists several events (e.g., a cultural weekend schedule with events at different venues), `extractEvents` returns one `EventDetails` per distinct event. `BackgroundEventProcessor` applies the first result to the original `PersistedEvent` and creates additional `PersistedEvent` rows for the rest.
 
-All use shared `sendRequestRaw()` for HTTP handling (90s timeout to accommodate web search via the Worker proxy). `sendRequest()` parses a single JSON object via `EventDetailsDTO`; `sendRequestMultiple()` tries JSON array first, falls back to single object. Network errors from `URLSession` are wrapped into `ClaudeAPIError.apiError` for consistent error classification. Empty extractions (all key fields nil) throw `ClaudeAPIError.noEventFound`.
+All use shared `sendRequestRaw()` for HTTP handling (90s timeout to accommodate web search via the Worker proxy). `sendRequest()` parses a single JSON object via `EventDetailsDTO`; `sendRequestMultiple()` tries JSON array first, falls back to single object. Network errors from `URLSession` are wrapped into `ExtractionError.apiError` for consistent error classification. Empty extractions (all key fields nil) throw `ExtractionError.noEventFound`.
 
 ### Extraction Fallback (Image → URL)
 
@@ -247,9 +247,9 @@ Instagram and Facebook shares typically provide only a `public.url` — no image
 
 **Extraction priority chain for social media URLs:**
 
-1. **OG image + OG text** → download and downsample the OG image via `ImageResizer.downsample(data:)`, then send to `ClaudeAPIService.extractEvents(imageData:additionalContext:)` with OG title/description as context. This is the highest-quality path — equivalent to a camera photo with caption metadata.
-2. **OG text only** (no image URL, or image download failed) → send OG title + description to `ClaudeAPIService.extractEventFromText(text:sourceURL:)` with web search enabled.
-3. **No OG data** (fetch failed entirely — private account, network error, etc.) → fall back to `ClaudeAPIService.extractEventFromSocialURL(urlString:captionText:)` which uses web search to find the event indirectly.
+1. **OG image + OG text** → download and downsample the OG image via `ImageResizer.downsample(data:)`, then send to `ExtractionService.extractEvents(imageData:additionalContext:)` with OG title/description as context. This is the highest-quality path — equivalent to a camera photo with caption metadata.
+2. **OG text only** (no image URL, or image download failed) → send OG title + description to `ExtractionService.extractEventFromText(text:sourceURL:)` with web search enabled.
+3. **No OG data** (fetch failed entirely — private account, network error, etc.) → fall back to `ExtractionService.extractEventFromSocialURL(urlString:captionText:)` which uses web search to find the event indirectly.
 
 **Long-term target:** Migrate from OG tag scraping to the [Meta oEmbed API](https://developers.facebook.com/docs/graph-api/reference/oembed-post/) (`GET /v25.0/instagram_oembed?url=...&access_token=...`), which returns structured caption HTML, author name, and thumbnail URL. Requires a Meta app with "Meta oEmbed Read" app review approval + an app access token. See ROADMAP.
 
@@ -271,12 +271,12 @@ The following components can be independently swapped or upgraded:
 
 | Component | Location | Current Value | Notes |
 |-----------|----------|---------------|-------|
-| **AI Model** | `ClaudeAPIService.swift` — `extractionModel` constant | `gpt-5-nano-2025-08-07` | Worker auto-routes by prefix: `gpt-*` → OpenAI Responses API, `claude-*` → Anthropic Messages API. Also add new models to `ALLOWED_MODELS` in `validation.ts`. Available: `claude-haiku-4-5`, `gpt-5-nano-2025-08-07`, `gpt-5.4-nano-2026-03-17`. OpenAI models: [developers.openai.com/api/docs/models/all](https://developers.openai.com/api/docs/models/all). |
-| **Web Search Tool** | `ClaudeAPIService.webSearchTool()` helper + `providers.ts` | Claude: `web_search_20250305` → OpenAI: `web_search` | Worker translates the Claude-format tool to the OpenAI equivalent automatically. Claude's `max_uses` is dropped for OpenAI (no equivalent). |
+| **AI Model** | `ExtractionService.swift` — `extractionModel` constant | `gpt-5-nano-2025-08-07` | Worker auto-routes by prefix: `gpt-*` → OpenAI Responses API, `claude-*` → Anthropic Messages API. Also add new models to `ALLOWED_MODELS` in `validation.ts`. Available: `claude-haiku-4-5`, `gpt-5-nano-2025-08-07`, `gpt-5.4-nano-2026-03-17`. OpenAI models: [developers.openai.com/api/docs/models/all](https://developers.openai.com/api/docs/models/all). |
+| **Web Search Tool** | `ExtractionService.webSearchTool()` helper + `providers.ts` | Claude: `web_search_20250305` → OpenAI: `web_search` | Worker translates the Claude-format tool to the OpenAI equivalent automatically. Claude's `max_uses` is dropped for OpenAI (no equivalent). |
 | **Provider Translation** | `cloudflare-worker/src/providers.ts` | Anthropic (passthrough) / OpenAI (translate) | Transforms request format (system→instructions, image blocks, tools) and response format (output_text→text blocks) so iOS parsing is unchanged. |
-| **User Location** | `ClaudeAPIService.webSearchTool()` — `user_location` parameter | Device timezone + country code | Provides localized web search results. Derived from `TimeZone.current` and `Locale.current.region`. Could be enhanced with reverse geocoding for city-level precision. |
+| **User Location** | `ExtractionService.webSearchTool()` — `user_location` parameter | Device timezone + country code | Provides localized web search results. Derived from `TimeZone.current` and `Locale.current.region`. Could be enhanced with reverse geocoding for city-level precision. |
 | **Image Compression** | `Shared/ImageResizer.swift` | 1024px max, JPEG 0.7→0.5→0.3 progressive, 1.5 MB cap | Progressive quality reduction keeps images under the Worker body limit after base64 inflation. |
-| **Extraction Gateway** | `ClaudeAPIService.swift` → Worker `/extract` route → LLM | App → Worker → OpenAI/Anthropic | Worker proxy keeps provider secrets server-side, enforces rate limits centrally, and translates between providers. |
+| **Extraction Gateway** | `ExtractionService.swift` → Worker `/extract` route → LLM | App → Worker → OpenAI/Anthropic | Worker proxy keeps provider secrets server-side, enforces rate limits centrally, and translates between providers. |
 | **Digest Email Provider** | `cloudflare-worker/src/email.ts` | Resend | Any transactional email API (SendGrid, Mailgun, etc.) — swap the HTTP call in `sendDigestEmail()`. |
 
 ## Calendar Integration
@@ -379,14 +379,9 @@ Source: `cloudflare-worker/src/legal.ts`. Linked from iOS Settings (About sectio
 
 ### Environments
 
-Two deployed environments: **staging** (`event-digest-worker-staging`) and **production** (`event-digest-worker`). Local development uses `wrangler dev` with in-memory KV.
+**Production** (`event-digest-worker`) is the active environment. All iOS builds (debug and release) hit production via `APIConfiguration.swift`. Local development uses `wrangler dev` with in-memory KV.
 
-- Distinct KV namespaces per environment
-- Distinct secrets (`JWT_SIGNING_SECRET` and `ADMIN_DASHBOARD_KEY` differ across environments for isolation)
-- Distinct email sender configuration (staging uses `daily-digest-staging@` prefix)
-- Staging has no cron trigger — digest is triggered manually for testing
-- iOS debug builds hit staging, release builds hit production (via `APIConfiguration.swift` `#if DEBUG`)
-- Deploy flow documented in `cloudflare-worker/DEPLOY.md`
+A **staging** environment (`event-digest-worker-staging`) is configured in `wrangler.toml` with its own KV namespace and no cron trigger, but is not actively routed to. It can be activated later by switching `APIConfiguration.swift` to use `#if DEBUG` branching. Deploy flow documented in `cloudflare-worker/DEPLOY.md`.
 
 ## Security
 

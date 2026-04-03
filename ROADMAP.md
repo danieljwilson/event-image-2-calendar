@@ -68,7 +68,7 @@ Status of Event Snap features and the path to a production-ready App Store relea
 ### Infrastructure
 - [x] XcodeGen project generation
 - [x] CI pipeline: worker typecheck + tests, iOS simulator build, gitleaks
-- [x] Multi-provider LLM extraction: Worker translation layer (`providers.ts`) auto-routes by model prefix — `gpt-*` → OpenAI Responses API, `claude-*` → Anthropic Messages API. Currently testing GPT-5 nano (`gpt-5-nano-2025-08-07`); fallback: GPT-5.4 nano (`gpt-5.4-nano-2026-03-17`) or Claude Haiku 4.5. One-line switch via `extractionModel` constant in `ClaudeAPIService.swift`.
+- [x] Multi-provider LLM extraction: Worker translation layer (`providers.ts`) auto-routes by model prefix — `gpt-*` → OpenAI Responses API, `claude-*` → Anthropic Messages API. Currently testing GPT-5 nano (`gpt-5-nano-2025-08-07`); fallback: GPT-5.4 nano (`gpt-5.4-nano-2026-03-17`) or Claude Haiku 4.5. One-line switch via `extractionModel` constant in `ExtractionService.swift`.
 
 ---
 
@@ -87,9 +87,10 @@ Priority: **Critical** — must be complete before any public beta or App Store 
 - [x] Create distinct Cloudflare Worker environments (staging + production, local dev via `wrangler dev`)
 - [x] Use separate KV namespaces and secrets per environment
 - [x] Document deploy/promotion flow from staging to production
+- [x] Create staging KV namespace and deploy staging Worker
 - [ ] Configure a verified production Resend sender domain
-- [ ] Create staging KV namespace (`npx wrangler kv namespace create EVENTS --env staging`) and update `wrangler.toml` with actual ID
-- [ ] Set staging secrets (`wrangler secret put <NAME> --env staging`)
+- [ ] Activate staging routing in iOS (currently all builds hit production; switch `APIConfiguration.swift` to `#if DEBUG` when ready)
+- [ ] Set remaining staging secrets (CLAUDE_API_KEY, OPENAI_API_KEY, RESEND_API_KEY, DIGEST_EMAIL_TO)
 
 ## Paperclip Integration
 
@@ -100,7 +101,7 @@ Paperclip is an open-source Node.js server + React UI that orchestrates teams of
 ### Evaluation & Setup
 - [ ] Deploy Paperclip locally and evaluate orchestration model against Event Snap's extraction pipeline
 - [ ] Define agent roles: extraction agent (Claude vision), enrichment agent (web search), quality-check agent (date/time validation)
-- [ ] Map current `BackgroundEventProcessor` → `ClaudeAPIService` flow to Paperclip task/ticket model
+- [ ] Map current `BackgroundEventProcessor` → `ExtractionService` flow to Paperclip task/ticket model
 
 ### Extraction Pipeline Migration
 - [ ] Move image extraction behind a Paperclip-managed agent with budget controls and cost tracking

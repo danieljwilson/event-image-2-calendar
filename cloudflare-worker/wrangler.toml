@@ -32,7 +32,7 @@ DIGEST_EMAIL_FROM = "Event Snap Staging <daily-digest-staging@danieljwilson.com>
 
 [[env.staging.kv_namespaces]]
 binding = "EVENTS"
-id = "STAGING_KV_NAMESPACE_ID"
+id = "f87eba6ae1104b17b345a8618f95c551"
 
 [env.staging.triggers]
 crons = []
