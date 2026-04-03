@@ -6,7 +6,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full system design and security. See 
 
 ## Tech Stack
 - **SwiftUI** (iOS 17+) with `@Observable` macro + **SwiftData** for persistence
-- **LLM Extraction** — multi-provider: currently **OpenAI GPT-5 nano** (`gpt-5-nano-2025-08-07`), Anthropic Claude available as fallback. Worker auto-routes by model prefix.
+- **LLM Extraction** — multi-provider: currently **OpenAI GPT-5.4 nano** (`gpt-5.4-nano-2026-03-17`), Anthropic Claude available as fallback. Worker auto-routes by model prefix.
 - **Cloudflare Worker** for extraction proxy (`POST /extract`) + **Resend** for daily digest emails
 - **Zero SPM dependencies** — all via platform frameworks
 - **XcodeGen** for project generation (`project.yml` → `.xcodeproj`)
@@ -19,6 +19,7 @@ EventImage2Calendar/                      # Main app target
 │   ├── EventDetails.swift                # @Observable + Codable event model (in-memory) + DTO
 │   └── PersistedEvent.swift              # SwiftData @Model + EventStatus enum
 ├── Services/
+│   ├── APIConfiguration.swift            # Centralized Worker base URL (#if DEBUG → staging, else → production)
 │   ├── ClaudeAPIService.swift            # LLM extraction client via Worker /extract proxy (vision + URL + text with web_search tool)
 │   ├── LocationService.swift             # CLLocationManager wrapper
 │   ├── CalendarService.swift             # Google Calendar URL + .ics generation
@@ -87,13 +88,24 @@ cloudflare-worker/
 # Regenerate Xcode project after changing project.yml
 xcodegen generate
 
-# Deploy Cloudflare Worker
-cd cloudflare-worker && npm install && wrangler deploy
-# Set secrets: wrangler secret put CLAUDE_API_KEY / OPENAI_API_KEY / RESEND_API_KEY / DIGEST_EMAIL_TO / JWT_SIGNING_SECRET / ADMIN_DASHBOARD_KEY
+# Local Worker dev (uses .dev.vars for secrets, in-memory KV)
+cd cloudflare-worker && npm run dev
+
+# Deploy Cloudflare Worker (staging first, then production)
+cd cloudflare-worker && npm install
+npm run deploy:staging      # → event-digest-worker-staging
+npm run deploy:production   # → event-digest-worker
+
+# Set secrets per environment
+wrangler secret put CLAUDE_API_KEY [--env staging]
+# Full list: CLAUDE_API_KEY, OPENAI_API_KEY, RESEND_API_KEY, DIGEST_EMAIL_TO, JWT_SIGNING_SECRET, ADMIN_DASHBOARD_KEY
+# Use DIFFERENT values for JWT_SIGNING_SECRET and ADMIN_DASHBOARD_KEY across environments
 ```
 
+iOS debug builds hit **staging**, release builds hit **production** (via `APIConfiguration.swift`). See `cloudflare-worker/DEPLOY.md` for full deploy/promotion flow.
+
 ## Common Tasks
-- **Change AI model**: Edit `extractionModel` constant in `ClaudeAPIService.swift`. Worker auto-routes by model prefix (`gpt-*` → OpenAI, `claude-*` → Anthropic). If the model isn't already in `ALLOWED_MODELS` in `validation.ts`, add it and redeploy Worker. Available OpenAI models: [developers.openai.com/api/docs/models/all](https://developers.openai.com/api/docs/models/all). Currently configured: `gpt-5-nano-2025-08-07`, `gpt-5.4-nano-2026-03-17`, `claude-haiku-4-5`.
+- **Change AI model**: Edit `extractionModel` constant in `ClaudeAPIService.swift`. Worker auto-routes by model prefix (`gpt-*` → OpenAI, `claude-*` → Anthropic). If the model isn't already in `ALLOWED_MODELS` in `validation.ts`, add it and redeploy Worker. Available OpenAI models: [developers.openai.com/api/docs/models/all](https://developers.openai.com/api/docs/models/all). Currently configured: `gpt-5-nano`, `gpt-5-nano-2025-08-07`, `gpt-5.4-nano`, `gpt-5.4-nano-2026-03-17`, `claude-haiku-4-5`.
 - **Adjust image compression**: Edit `UIImage.resizedForAPI()` in `Shared/ImageResizer.swift`
 - **Modify extraction prompt**: Edit system/user prompts in `ClaudeAPIService.swift`
 - **Change digest schedule**: Edit `crons` in `cloudflare-worker/wrangler.toml`

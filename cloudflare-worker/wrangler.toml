@@ -8,6 +8,9 @@ compatibility_date = "2024-01-01"
 # JWT_SIGNING_SECRET - HMAC secret for short-lived access tokens
 # CLAUDE_API_KEY - Anthropic API key for Claude model extraction
 # OPENAI_API_KEY - OpenAI API key for GPT model extraction
+# ADMIN_DASHBOARD_KEY - shared secret for admin dashboard access
+
+# ── Production (default, no --env flag needed) ───────────────
 
 [vars]
 DIGEST_EMAIL_FROM = "Event Snap Digest <daily-digest@danieljwilson.com>"
@@ -18,3 +21,18 @@ id = "88cdb7c27c1d41169d84c817e2d86c34"
 
 [triggers]
 crons = ["0 8 * * *"]
+
+# ── Staging ──────────────────────────────────────────────────
+
+[env.staging]
+name = "event-digest-worker-staging"
+
+[env.staging.vars]
+DIGEST_EMAIL_FROM = "Event Snap Staging <daily-digest-staging@danieljwilson.com>"
+
+[[env.staging.kv_namespaces]]
+binding = "EVENTS"
+id = "STAGING_KV_NAMESPACE_ID"
+
+[env.staging.triggers]
+crons = []

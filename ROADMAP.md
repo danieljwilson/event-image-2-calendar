@@ -84,10 +84,12 @@ Priority: **Critical** — must be complete before any public beta or App Store 
 - [x] Add cost/budget monitoring for LLM usage — Worker captures token usage + cost per extraction, stores per-device and global aggregates in KV, iOS displays in Settings via `GET /usage`
 
 ### Environment separation
-- [ ] Create distinct Cloudflare Worker environments for `dev`, `staging`, and `production`
-- [ ] Use separate KV namespaces and secrets per environment
-- [ ] Document deploy/promotion flow from staging to production
+- [x] Create distinct Cloudflare Worker environments (staging + production, local dev via `wrangler dev`)
+- [x] Use separate KV namespaces and secrets per environment
+- [x] Document deploy/promotion flow from staging to production
 - [ ] Configure a verified production Resend sender domain
+- [ ] Create staging KV namespace (`npx wrangler kv namespace create EVENTS --env staging`) and update `wrangler.toml` with actual ID
+- [ ] Set staging secrets (`wrangler secret put <NAME> --env staging`)
 
 ## Paperclip Integration
 

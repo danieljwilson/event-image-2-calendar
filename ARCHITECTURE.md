@@ -6,7 +6,7 @@ Event Snap is an iOS app that extracts event details from poster photos (or shar
 
 - **iOS 17+** — SwiftUI, SwiftData, `@Observable` macro, zero SPM dependencies
 - **XcodeGen** — `project.yml` → `.xcodeproj`
-- **LLM Extraction** — multi-provider via Worker proxy; currently **OpenAI GPT-5 nano** (`gpt-5-nano-2025-08-07`), with Anthropic Claude (`claude-haiku-4-5`) available as fallback. Provider auto-detected from model name.
+- **LLM Extraction** — multi-provider via Worker proxy; currently **OpenAI GPT-5.4 nano** (`gpt-5.4-nano-2026-03-17`), with Anthropic Claude (`claude-haiku-4-5`) available as fallback. Provider auto-detected from model name.
 - **Cloudflare Worker** — TypeScript, auth, extraction proxy (`POST /extract`), KV storage, cron-triggered digest
 - **Resend** — transactional email for daily digest
 
@@ -379,12 +379,14 @@ Source: `cloudflare-worker/src/legal.ts`. Linked from iOS Settings (About sectio
 
 ### Environments
 
-The production target uses separate `dev`, `staging`, and `production` Worker environments, each with:
+Two deployed environments: **staging** (`event-digest-worker-staging`) and **production** (`event-digest-worker`). Local development uses `wrangler dev` with in-memory KV.
 
-- Distinct KV namespaces
-- Distinct secrets
-- Distinct email sender configuration
-- A documented promotion path from staging to production
+- Distinct KV namespaces per environment
+- Distinct secrets (`JWT_SIGNING_SECRET` and `ADMIN_DASHBOARD_KEY` differ across environments for isolation)
+- Distinct email sender configuration (staging uses `daily-digest-staging@` prefix)
+- Staging has no cron trigger — digest is triggered manually for testing
+- iOS debug builds hit staging, release builds hit production (via `APIConfiguration.swift` `#if DEBUG`)
+- Deploy flow documented in `cloudflare-worker/DEPLOY.md`
 
 ## Security
 

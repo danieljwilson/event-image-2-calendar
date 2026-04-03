@@ -70,7 +70,7 @@ enum ClaudeAPIService {
     /// Available OpenAI models: https://developers.openai.com/api/docs/models/all
     private static let extractionModel = "gpt-5.4-nano-2026-03-17"
 
-    private static let extractEndpoint = URL(string: "https://event-digest-worker.daniel-j-wilson-587.workers.dev/extract")!
+    private static var extractEndpoint: URL { APIConfiguration.workerBaseURL.appendingPathComponent("extract") }
 
     static func extractEvent(
         imageData: Data,

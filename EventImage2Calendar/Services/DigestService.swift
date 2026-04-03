@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 enum DigestService {
-    private static let workerURL = URL(string: "https://event-digest-worker.daniel-j-wilson-587.workers.dev/events")!
+    private static var workerURL: URL { APIConfiguration.workerBaseURL.appendingPathComponent("events") }
     private static let flushCoordinator = DigestFlushCoordinator()
 
     struct EventPayload: Encodable, Sendable {

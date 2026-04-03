@@ -3,7 +3,7 @@ import CryptoKit
 import Security
 
 enum WorkerAuthService {
-    private static let workerBaseURL = URL(string: "https://event-digest-worker.daniel-j-wilson-587.workers.dev")!
+    private static var workerBaseURL: URL { APIConfiguration.workerBaseURL }
     private static let keychainService = "com.eventsnap.EventImage2Calendar.worker-auth"
     private static let deviceIDAccount = "worker-device-id"
     private static let privateKeyAccount = "worker-private-key"

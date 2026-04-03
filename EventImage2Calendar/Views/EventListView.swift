@@ -674,8 +674,7 @@ private struct DateCorrectionSheet: View {
 func reportEventStatus(_ eventId: String, status: String) {
     Task {
         guard let token = await WorkerAuthService.accessToken() else { return }
-        let baseURL = "https://event-digest-worker.daniel-j-wilson-587.workers.dev"
-        guard let url = URL(string: "\(baseURL)/events/\(eventId)/status") else { return }
+        let url = APIConfiguration.workerBaseURL.appendingPathComponent("events/\(eventId)/status")
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
