@@ -37,6 +37,27 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "E2CAC0F4EB2AF2B0C322A244"
+               BuildableName = "EventImage2CalendarTests.xctest"
+               BlueprintName = "EventImage2CalendarTests"
+               ReferencedContainer = "container:EventImage2Calendar.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "D9E2245A871B3430591B048F"
+               BuildableName = "EventImage2CalendarUITests.xctest"
+               BlueprintName = "EventImage2CalendarUITests"
+               ReferencedContainer = "container:EventImage2Calendar.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

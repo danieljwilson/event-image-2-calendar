@@ -212,7 +212,7 @@ interface ClaudeFormatResponse {
 
 /**
  * Transform an OpenAI Responses API JSON body into the Claude Messages API
- * shape that the iOS client expects (`ClaudeResponse`).
+ * shape that the iOS client expects (`ExtractionResponse`).
  *
  * Returns `null` if the response is not in the expected OpenAI format
  * (caller should fall back to passing the raw body through).

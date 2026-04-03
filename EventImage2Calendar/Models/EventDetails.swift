@@ -47,7 +47,7 @@ class EventDetails {
     }
 }
 
-// MARK: - JSON Decoding from Claude API response
+// MARK: - JSON Decoding from LLM API response
 
 struct EventDetailsDTO: Decodable {
     let title: String?
@@ -113,7 +113,7 @@ struct EventDetailsDTO: Decodable {
         )
     }
 
-    /// Strip `<cite>` and `</cite>` tags from Claude web search responses.
+    /// Strip `<cite>` and `</cite>` tags from LLM web search responses.
     private static func stripCiteTags(_ text: String) -> String {
         text.replacingOccurrences(of: #"<cite[^>]*>"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: "</cite>", with: "")

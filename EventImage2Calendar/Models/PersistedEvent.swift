@@ -201,7 +201,7 @@ final class PersistedEvent {
         }
     }
 
-    func applyExtraction(_ details: EventDetails, usage: ClaudeResponse.Usage? = nil) {
+    func applyExtraction(_ details: EventDetails, usage: ExtractionResponse.Usage? = nil) {
         self.title = details.title
         self.startDate = details.startDate
         self.endDate = details.endDate

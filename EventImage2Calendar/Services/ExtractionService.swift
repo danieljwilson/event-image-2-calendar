@@ -212,7 +212,7 @@ enum ExtractionService {
             "max_tokens": 4096,
             "modality": "image",
             "system": systemPrompt,
-            "tools": [Self.webSearchTool(maxUses: 5)],
+            "tools": [Self.webSearchTool(maxUses: 2)],
             "messages": [
                 [
                     "role": "user",
@@ -298,7 +298,7 @@ enum ExtractionService {
             "max_tokens": 2048,
             "modality": "url",
             "system": systemPrompt,
-            "tools": [Self.webSearchTool(maxUses: 5)],
+            "tools": [Self.webSearchTool(maxUses: 2)],
             "messages": [
                 [
                     "role": "user",
@@ -396,7 +396,7 @@ enum ExtractionService {
             "max_tokens": 2048,
             "modality": "social",
             "system": systemPrompt,
-            "tools": [Self.webSearchTool(maxUses: 5)],
+            "tools": [Self.webSearchTool(maxUses: 2)],
             "messages": [
                 [
                     "role": "user",
@@ -477,7 +477,7 @@ enum ExtractionService {
             "max_tokens": 2048,
             "modality": "text",
             "system": systemPrompt,
-            "tools": [Self.webSearchTool(maxUses: 3)],
+            "tools": [Self.webSearchTool(maxUses: 2)],
             "messages": [
                 [
                     "role": "user",
@@ -518,7 +518,7 @@ enum ExtractionService {
         // Fall back to single object
         let objectJSON = extractJSON(from: rawText)
 
-        // If no JSON object found, Claude responded with prose
+        // If no JSON object found, the LLM responded with prose
         if !objectJSON.contains("{") {
             SharedContainerService.writeDebugLog("API: no JSON object in response — narrative text detected (multi)")
             throw ExtractionError.noEventFound
@@ -610,15 +610,15 @@ enum ExtractionService {
             throw ExtractionError.apiError("HTTP \(httpResponse.statusCode): \(body)")
         }
 
-        let claudeResponse = try JSONDecoder().decode(ExtractionResponse.self, from: data)
-        let blockTypes = claudeResponse.content.map { $0.type }
-        SharedContainerService.writeDebugLog("API: stop_reason=\(claudeResponse.stopReason ?? "nil"), content blocks: \(blockTypes)")
+        let extractionResponse = try JSONDecoder().decode(ExtractionResponse.self, from: data)
+        let blockTypes = extractionResponse.content.map { $0.type }
+        SharedContainerService.writeDebugLog("API: stop_reason=\(extractionResponse.stopReason ?? "nil"), content blocks: \(blockTypes)")
 
-        if let usage = claudeResponse.usage {
+        if let usage = extractionResponse.usage {
             SharedContainerService.writeDebugLog("API: tokens — input: \(usage.inputTokens), output: \(usage.outputTokens), total: \(usage.totalTokens)")
         }
 
-        let allText = claudeResponse.content
+        let allText = extractionResponse.content
             .filter { $0.type == "text" }
             .compactMap(\.text)
         guard !allText.isEmpty else {
@@ -628,14 +628,14 @@ enum ExtractionService {
         let jsonString = allText.joined()
 
         SharedContainerService.writeDebugLog("API: response JSON (\(jsonString.count) chars): \(String(jsonString.prefix(1000)))")
-        return (jsonString, claudeResponse.usage)
+        return (jsonString, extractionResponse.usage)
     }
 
     private static func sendRequest(_ requestBody: [String: Any]) async throws -> ExtractionOutput {
         let (rawText, usage) = try await sendRequestRaw(requestBody)
         let cleanJSON = extractJSON(from: rawText)
 
-        // If no JSON object found, Claude responded with prose — treat as no event found
+        // If no JSON object found, the LLM responded with prose — treat as no event found
         if !cleanJSON.contains("{") {
             SharedContainerService.writeDebugLog("API: no JSON object in response — narrative text detected")
             throw ExtractionError.noEventFound
