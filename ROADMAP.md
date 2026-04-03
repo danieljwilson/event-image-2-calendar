@@ -137,8 +137,8 @@ Priority: **High** — prerequisite for reliable daily use.
 - [x] TestFlight build uploaded + App Store Connect record created
 - [x] In-app feedback: Settings row + screenshot-triggered prompt via MFMailComposeViewController, with local feedback log
 - [ ] TestFlight beta cycle with external testers and bug triage
-- [ ] Minimal iOS automated tests for calendar formatting, event parsing, and persistence recovery
-- [ ] Basic UI smoke test for the happy-path extraction flow
+- [x] Minimal iOS automated tests for calendar formatting, event parsing, and persistence recovery
+- [x] Basic UI smoke test for the happy-path extraction flow
 - [x] Client crash reporting via MetricKit (`CrashReportingService`) + improved debug logging in Share Extension and BackgroundEventProcessor
 - [x] Debug log viewer in Settings > Diagnostics for viewing Share Extension and extraction logs
 - [x] Graceful error handling for network failures and API errors

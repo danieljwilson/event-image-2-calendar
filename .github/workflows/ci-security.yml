@@ -32,21 +32,21 @@ jobs:
       - name: Test
         run: npm test
 
-  ios-build:
-    name: iOS Build
+  ios-test:
+    name: iOS Build & Test
     runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build iOS App
+      - name: Build & Test iOS App
         run: |
           xcodebuild \
             -project EventImage2Calendar.xcodeproj \
             -scheme EventImage2Calendar \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            test
 
   secret-scan:
     name: Secret Scan

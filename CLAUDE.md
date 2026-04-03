@@ -60,6 +60,15 @@ cloudflare-worker/
 │   ├── security.ts                       # JWT + signature verification helpers
 │   ├── validation.ts                     # Request/schema validation
 │   └── types.ts                          # TypeScript interfaces
+
+EventImage2CalendarTests/                  # Unit test target
+├── CalendarFormattingTests.swift          # Google Calendar URL + ICS generation
+├── EventParsingTests.swift               # EventDetailsDTO parsing + date handling
+├── PersistenceTests.swift                # PersistedEvent computed props + applyExtraction
+└── SharedContainerTests.swift            # PendingShare Codable round-trip
+
+EventImage2CalendarUITests/                # UI test target
+└── HappyPathUITests.swift                # Launch smoke test (list, settings navigation)
 ```
 
 ## Key Conventions

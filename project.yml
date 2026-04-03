@@ -31,7 +31,9 @@ targets:
     dependencies:
       - target: ShareExtension
     scheme:
-      testTargets: []
+      testTargets:
+        - EventImage2CalendarTests
+        - EventImage2CalendarUITests
 
   ShareExtension:
     type: app-extension
@@ -52,3 +54,33 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
     scheme:
       testTargets: []
+
+  EventImage2CalendarTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - EventImage2CalendarTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.eventsnap.EventImage2CalendarTests
+        DEVELOPMENT_TEAM: RZ74J65XU2
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+    dependencies:
+      - target: EventImage2Calendar
+
+  EventImage2CalendarUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - EventImage2CalendarUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.eventsnap.EventImage2CalendarUITests
+        DEVELOPMENT_TEAM: RZ74J65XU2
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+    dependencies:
+      - target: EventImage2Calendar

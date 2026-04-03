@@ -1,7 +1,7 @@
 import Foundation
 import CoreLocation
 
-enum ClaudeAPIError: LocalizedError {
+enum ExtractionError: LocalizedError {
     case authFailed
     case invalidResponse
     case apiError(String)
@@ -61,7 +61,7 @@ enum ClaudeAPIError: LocalizedError {
     }
 }
 
-enum ClaudeAPIService {
+enum ExtractionService {
     /// The LLM model used for all extraction requests.
     /// Change this to switch providers — the Worker routes automatically based on model prefix:
     ///   gpt-*  → OpenAI Responses API
@@ -79,7 +79,7 @@ enum ClaudeAPIService {
         language: String = "English"
     ) async throws -> ExtractionOutput {
         let output = try await extractEvents(imageData: imageData, location: location, additionalContext: additionalContext, language: language)
-        guard !output.events.isEmpty else { throw ClaudeAPIError.noEventFound }
+        guard !output.events.isEmpty else { throw ExtractionError.noEventFound }
         return output
     }
 
@@ -521,20 +521,20 @@ enum ClaudeAPIService {
         // If no JSON object found, Claude responded with prose
         if !objectJSON.contains("{") {
             SharedContainerService.writeDebugLog("API: no JSON object in response — narrative text detected (multi)")
-            throw ClaudeAPIError.noEventFound
+            throw ExtractionError.noEventFound
         }
 
         guard let data = objectJSON.data(using: .utf8) else {
-            throw ClaudeAPIError.decodingFailed("Could not convert response to data")
+            throw ExtractionError.decodingFailed("Could not convert response to data")
         }
 
         do {
             let dto = try JSONDecoder().decode(EventDetailsDTO.self, from: data)
             if dto.title == nil && dto.venue == nil && dto.startDatetime == nil {
-                throw ClaudeAPIError.noEventFound
+                throw ExtractionError.noEventFound
             }
             return ExtractionOutput(events: [dto.toEventDetails()], usage: usage)
-        } catch let error as ClaudeAPIError {
+        } catch let error as ExtractionError {
             throw error
         } catch {
             let recovered = repairTruncatedJSON(objectJSON)
@@ -544,15 +544,15 @@ enum ClaudeAPIService {
                 return ExtractionOutput(events: [dto.toEventDetails()], usage: usage)
             }
             SharedContainerService.writeDebugLog("JSON decode failed (multi). Raw: \(objectJSON.prefix(500))")
-            throw ClaudeAPIError.decodingFailed(error.localizedDescription)
+            throw ExtractionError.decodingFailed(error.localizedDescription)
         }
     }
 
     /// Sends the extraction request via the Worker proxy and returns raw text + usage from the response.
-    private static func sendRequestRaw(_ requestBody: [String: Any]) async throws -> (String, ClaudeResponse.Usage?) {
+    private static func sendRequestRaw(_ requestBody: [String: Any]) async throws -> (String, ExtractionResponse.Usage?) {
         guard let token = await WorkerAuthService.accessToken() else {
             SharedContainerService.writeDebugLog("API: auth failed — could not obtain JWT")
-            throw ClaudeAPIError.authFailed
+            throw ExtractionError.authFailed
         }
 
         let bodyData = try JSONSerialization.data(withJSONObject: requestBody)
@@ -566,13 +566,13 @@ enum ClaudeAPIService {
             SharedContainerService.writeDebugLog("API: 401 received, refreshing token and retrying")
             WorkerAuthService.clearCachedToken()
             guard let freshToken = await WorkerAuthService.accessToken() else {
-                throw ClaudeAPIError.authFailed
+                throw ExtractionError.authFailed
             }
             let (retryData, retryResponse) = try await executeExtractRequest(bodyData: bodyData, token: freshToken)
-            return try parseClaudeResponse(data: retryData, httpResponse: retryResponse)
+            return try parseExtractionResponse(data: retryData, httpResponse: retryResponse)
         }
 
-        return try parseClaudeResponse(data: data, httpResponse: httpResponse)
+        return try parseExtractionResponse(data: data, httpResponse: httpResponse)
     }
 
     private static func executeExtractRequest(bodyData: Data, token: String) async throws -> (Data, HTTPURLResponse) {
@@ -591,26 +591,26 @@ enum ClaudeAPIService {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
             SharedContainerService.writeDebugLog("API: network error: \(error)")
-            throw ClaudeAPIError.apiError("Network error: \(error.localizedDescription)")
+            throw ExtractionError.apiError("Network error: \(error.localizedDescription)")
         }
 
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw ClaudeAPIError.invalidResponse
+            throw ExtractionError.invalidResponse
         }
 
         return (data, httpResponse)
     }
 
-    private static func parseClaudeResponse(data: Data, httpResponse: HTTPURLResponse) throws -> (String, ClaudeResponse.Usage?) {
+    private static func parseExtractionResponse(data: Data, httpResponse: HTTPURLResponse) throws -> (String, ExtractionResponse.Usage?) {
         SharedContainerService.writeDebugLog("API: HTTP \(httpResponse.statusCode), response \(data.count) bytes")
 
         guard httpResponse.statusCode == 200 else {
             let body = String(data: data, encoding: .utf8) ?? "Unknown error"
             SharedContainerService.writeDebugLog("API: error body: \(String(body.prefix(500)))")
-            throw ClaudeAPIError.apiError("HTTP \(httpResponse.statusCode): \(body)")
+            throw ExtractionError.apiError("HTTP \(httpResponse.statusCode): \(body)")
         }
 
-        let claudeResponse = try JSONDecoder().decode(ClaudeResponse.self, from: data)
+        let claudeResponse = try JSONDecoder().decode(ExtractionResponse.self, from: data)
         let blockTypes = claudeResponse.content.map { $0.type }
         SharedContainerService.writeDebugLog("API: stop_reason=\(claudeResponse.stopReason ?? "nil"), content blocks: \(blockTypes)")
 
@@ -623,7 +623,7 @@ enum ClaudeAPIService {
             .compactMap(\.text)
         guard !allText.isEmpty else {
             SharedContainerService.writeDebugLog("API: no text block found in response")
-            throw ClaudeAPIError.invalidResponse
+            throw ExtractionError.invalidResponse
         }
         let jsonString = allText.joined()
 
@@ -638,20 +638,20 @@ enum ClaudeAPIService {
         // If no JSON object found, Claude responded with prose — treat as no event found
         if !cleanJSON.contains("{") {
             SharedContainerService.writeDebugLog("API: no JSON object in response — narrative text detected")
-            throw ClaudeAPIError.noEventFound
+            throw ExtractionError.noEventFound
         }
 
         guard let jsonData = cleanJSON.data(using: .utf8) else {
-            throw ClaudeAPIError.decodingFailed("Could not convert response to data")
+            throw ExtractionError.decodingFailed("Could not convert response to data")
         }
 
         do {
             let dto = try JSONDecoder().decode(EventDetailsDTO.self, from: jsonData)
             if dto.title == nil && dto.venue == nil && dto.startDatetime == nil {
-                throw ClaudeAPIError.noEventFound
+                throw ExtractionError.noEventFound
             }
             return ExtractionOutput(events: [dto.toEventDetails()], usage: usage)
-        } catch let error as ClaudeAPIError {
+        } catch let error as ExtractionError {
             throw error
         } catch {
             // Try truncation recovery: close open strings/objects
@@ -662,7 +662,7 @@ enum ClaudeAPIService {
                 return ExtractionOutput(events: [dto.toEventDetails()], usage: usage)
             }
             SharedContainerService.writeDebugLog("JSON decode failed. Raw: \(cleanJSON.prefix(500))")
-            throw ClaudeAPIError.decodingFailed(error.localizedDescription)
+            throw ExtractionError.decodingFailed(error.localizedDescription)
         }
     }
 
@@ -804,9 +804,9 @@ enum ClaudeAPIService {
     }
 }
 
-// MARK: - Claude Messages API response types
+// MARK: - LLM extraction response types
 
-struct ClaudeResponse: Decodable {
+struct ExtractionResponse: Decodable {
     let content: [ContentBlock]
     let stopReason: String?
     let usage: Usage?
@@ -837,5 +837,5 @@ struct ClaudeResponse: Decodable {
 
 struct ExtractionOutput {
     let events: [EventDetails]
-    let usage: ClaudeResponse.Usage?
+    let usage: ExtractionResponse.Usage?
 }

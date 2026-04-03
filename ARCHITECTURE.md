@@ -475,8 +475,16 @@ When extraction fails after all retries, `BackgroundEventProcessor` fires a non-
 - URL allowlisting
 - KV cursor pagination behavior
 
+### iOS Tests
+
+- **CalendarFormattingTests**: Google Calendar URL generation (timed, all-day, multi-day, timezone, special chars), ICS file generation (structure, escaping, multi-event)
+- **EventParsingTests**: `EventDetailsDTO.toEventDetails()` mapping, date parsing (ISO 8601, date-only, timezone), cite tag stripping, date/time certainty flags
+- **PersistenceTests**: `PersistedEvent` computed properties (`canRetry`, `needsDateCorrection`, `hasRetryableError`, `isStuckProcessing`), `applyExtraction` status transitions, `eventDates` JSON round-trip
+- **SharedContainerTests**: `PendingShare` Codable round-trip across source types
+- **HappyPathUITests**: Launch with `--skip-onboarding`, verify event list and settings navigation
+
 ### CI Pipeline
 
 - Worker: dependency install, TypeScript typecheck, test suite
-- iOS: simulator build validation
+- iOS: simulator build + unit tests + UI tests
 - Security: gitleaks secret scanning
