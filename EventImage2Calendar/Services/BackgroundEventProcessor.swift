@@ -131,6 +131,8 @@ class BackgroundEventProcessor {
         let language = UserDefaults.standard.string(forKey: "extractionLanguage") ?? "English"
         let deviceModel = UIDevice.current.model
         let iOSVersion = UIDevice.current.systemVersion
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
 
         var bgTaskID: UIBackgroundTaskIdentifier = .invalid
         bgTaskID = UIApplication.shared.beginBackgroundTask(withName: taskName) {
@@ -158,7 +160,7 @@ class BackgroundEventProcessor {
                     if let imageData {
                         SharedContainerService.writeDebugLog("Extraction: image path (\(imageData.count) bytes)")
                         do {
-                            output = try await ClaudeAPIService.extractEvents(
+                            output = try await ExtractionService.extractEvents(
                                 imageData: imageData, location: location, language: language
                             )
                         } catch let imageError where sourceURL != nil && Self.shouldFallbackToURL(imageError) {
@@ -174,11 +176,11 @@ class BackgroundEventProcessor {
                         )
                     } else if let sourceText, !sourceText.isEmpty {
                         SharedContainerService.writeDebugLog("Extraction: text-only path (\(sourceText.count) chars)")
-                        output = try await ClaudeAPIService.extractEventFromText(
+                        output = try await ExtractionService.extractEventFromText(
                             text: sourceText, sourceURL: nil, location: location, language: language
                         )
                     } else {
-                        throw ClaudeAPIError.invalidResponse
+                        throw ExtractionError.invalidResponse
                     }
 
                     let allDetails = output.events
@@ -238,7 +240,7 @@ class BackgroundEventProcessor {
                 } catch {
                     lastError = error
                     SharedContainerService.writeDebugLog("Extraction attempt \(attempt + 1) failed: \(error)")
-                    let isRetryable = (error as? ClaudeAPIError)?.isRetryable ?? (error is URLError)
+                    let isRetryable = (error as? ExtractionError)?.isRetryable ?? (error is URLError)
                     if !isRetryable || attempt == maxAutoRetries - 1 { break }
                     let delay = baseDelay * UInt64(1 << attempt)
                     try? await Task.sleep(nanoseconds: delay)
@@ -246,8 +248,8 @@ class BackgroundEventProcessor {
             }
 
             let baseMessage: String
-            if let claudeError = lastError as? ClaudeAPIError {
-                baseMessage = claudeError.userFacingMessage
+            if let extractionError = lastError as? ExtractionError {
+                baseMessage = extractionError.userFacingMessage
             } else {
                 baseMessage = lastError?.localizedDescription ?? "Unknown error"
             }
@@ -259,7 +261,7 @@ class BackgroundEventProcessor {
             )
 
             let failElapsed = CFAbsoluteTimeGetCurrent() - extractionStart
-            let isRetryable = (lastError as? ClaudeAPIError)?.isRetryable ?? false
+            let isRetryable = (lastError as? ExtractionError)?.isRetryable ?? false
             SharedContainerService.writeDebugLog(
                 "Extraction FAILED: event=\(eventID), elapsed=\(String(format: "%.1f", failElapsed))s, " +
                 "retryable=\(isRetryable), " +
@@ -268,8 +270,8 @@ class BackgroundEventProcessor {
 
             // Report error to Worker for remote dashboard visibility
             let errorType: String
-            if let claudeError = lastError as? ClaudeAPIError {
-                switch claudeError {
+            if let extractionError = lastError as? ExtractionError {
+                switch extractionError {
                 case .authFailed: errorType = "authFailed"
                 case .invalidResponse: errorType = "invalidResponse"
                 case .apiError: errorType = "apiError"
@@ -293,8 +295,8 @@ class BackgroundEventProcessor {
                 sourceType = "text"
             }
 
-            let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-            let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+            let version = appVersion
+            let build = buildNumber
 
             WorkerAuthService.reportError(WorkerAuthService.ErrorReport(
                 eventId: eventID.uuidString,
@@ -331,7 +333,7 @@ class BackgroundEventProcessor {
     }
 
     /// Apply extraction results to a PersistedEvent and add a search link when needed.
-    private static func applyAndFinalize(_ details: EventDetails, to persisted: PersistedEvent, usage: ClaudeResponse.Usage?) {
+    private static func applyAndFinalize(_ details: EventDetails, to persisted: PersistedEvent, usage: ExtractionResponse.Usage?) {
         persisted.applyExtraction(details, usage: usage)
 
         if !persisted.eventDescription.contains("http") {
@@ -468,8 +470,8 @@ class BackgroundEventProcessor {
     /// Only extraction-level failures (content not parseable) warrant fallback.
     /// Auth, network, quota, and server errors do not — they'd fail on the URL path too.
     private static func shouldFallbackToURL(_ error: Error) -> Bool {
-        guard let claudeError = error as? ClaudeAPIError else { return false }
-        switch claudeError {
+        guard let extractionError = error as? ExtractionError else { return false }
+        switch extractionError {
         case .noEventFound, .decodingFailed, .invalidResponse:
             return true
         case .authFailed, .apiError:
@@ -506,7 +508,7 @@ class BackgroundEventProcessor {
         return baseMessage
     }
 
-    // MARK: - URL extraction (Claude uses web search to fetch and extract)
+    // MARK: - URL extraction (LLM uses web search to fetch and extract)
 
     /// Minimum character count for sourceText (after URL stripping) to be treated as page content.
     private static let substantiveTextThreshold = 50
@@ -514,7 +516,7 @@ class BackgroundEventProcessor {
     /// Minimum character count for social media captions to be treated as page content.
     private static let socialMediaTextThreshold = 15
 
-    /// Send URL to Claude with web search — it handles page fetching internally.
+    /// Send URL to LLM with web search — it handles page fetching internally.
     private static func extractFromURL(
         _ urlString: String,
         sourceText: String?,
@@ -533,7 +535,7 @@ class BackgroundEventProcessor {
 
             if strippedText.count >= threshold {
                 SharedContainerService.writeDebugLog("Extraction: text path with source URL (substantive text)")
-                return try await ClaudeAPIService.extractEventFromText(
+                return try await ExtractionService.extractEventFromText(
                     text: sourceText, sourceURL: urlString, location: location, language: language
                 )
             } else {
@@ -562,11 +564,11 @@ class BackgroundEventProcessor {
                     if let desc = metadata.description { context += "Post caption: \(desc)\n" }
                     context += "Source: \(urlString)"
 
-                    let output = try await ClaudeAPIService.extractEvents(
+                    let output = try await ExtractionService.extractEvents(
                         imageData: imageData, location: location,
                         additionalContext: context, language: language
                     )
-                    guard !output.events.isEmpty else { throw ClaudeAPIError.noEventFound }
+                    guard !output.events.isEmpty else { throw ExtractionError.noEventFound }
                     return output
                 }
 
@@ -574,7 +576,7 @@ class BackgroundEventProcessor {
                 let ogText = [metadata.title, metadata.description].compactMap { $0 }.joined(separator: "\n")
                 if !ogText.isEmpty {
                     SharedContainerService.writeDebugLog("Extraction: OG text only (\(ogText.count) chars)")
-                    return try await ClaudeAPIService.extractEventFromText(
+                    return try await ExtractionService.extractEventFromText(
                         text: ogText, sourceURL: urlString, location: location, language: language
                     )
                 }
@@ -584,14 +586,14 @@ class BackgroundEventProcessor {
 
             // Last resort: social-aware extraction with just URL (rarely succeeds)
             SharedContainerService.writeDebugLog("Extraction: social media fallback for \(urlString.prefix(80))")
-            return try await ClaudeAPIService.extractEventFromSocialURL(
+            return try await ExtractionService.extractEventFromSocialURL(
                 urlString: urlString, captionText: sourceText, location: location, language: language
             )
         }
 
-        // Non-social: let Claude web-search the URL directly
+        // Non-social: let the LLM web-search the URL directly
         SharedContainerService.writeDebugLog("Extraction: URL path with web search for \(urlString.prefix(80))")
-        return try await ClaudeAPIService.extractEventFromURL(
+        return try await ExtractionService.extractEventFromURL(
             urlString: urlString, location: location, language: language
         )
     }
