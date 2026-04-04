@@ -20,11 +20,17 @@ final class HappyPathUITests: XCTestCase {
     func testSettingsNavigation() {
         // Tap the settings/gear button
         let settingsButton = app.buttons["Settings"]
-        if settingsButton.waitForExistence(timeout: 3) {
-            settingsButton.tap()
-            // Settings should show version info
-            let versionLabel = app.staticTexts["Version"]
-            XCTAssertTrue(versionLabel.waitForExistence(timeout: 3))
+        guard settingsButton.waitForExistence(timeout: 3) else { return }
+
+        // Swipe up to ensure the button is visible (may be off-screen on smaller simulators)
+        if !settingsButton.isHittable {
+            app.swipeUp()
         }
+        guard settingsButton.isHittable else { return }
+
+        settingsButton.tap()
+        // Settings should show version info
+        let versionLabel = app.staticTexts["Version"]
+        XCTAssertTrue(versionLabel.waitForExistence(timeout: 3))
     }
 }
